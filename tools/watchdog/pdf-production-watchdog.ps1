@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Watchdog for `brain-asset-pdf-pipeline.ps1 -Production`.
