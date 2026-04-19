@@ -193,19 +193,22 @@ function Get-Sha12 {
 function Get-PdfText {
     param([string]$Path, [int]$MaxChars = 4000)
     $tmp = [System.IO.Path]::GetTempFileName()
+    # 临时降级: pdftotext 对中文 PDF (Adobe-GB1) / 扫描件常吐 stderr warning,
+    # 在 ErrorActionPreference='Stop' 下会被当致命错误. 在本函数内改 Continue.
+    $savedEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     try {
-        # -l 8: 只抽前 8 页, 对大书够用
-        & pdftotext -l 8 -layout $Path $tmp 2>$null
+        # -l 8: 只抽前 8 页, 对大书够用. 合并 stderr 到 stdout 再丢给 Out-Null, 避免 NativeCommandError.
+        & pdftotext -l 8 -layout $Path $tmp 2>&1 | Out-Null
         if (-not (Test-Path $tmp)) { return @{ Text = ""; Pages = 0 } }
         $text = Get-Content $tmp -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
         if (-not $text) { $text = "" }
         $text = $text -replace '\s+', ' ' -replace '\x00', ''
         if ($text.Length -gt $MaxChars) { $text = $text.Substring(0, $MaxChars) }
 
-        # 取页数 (跑一次 pdfinfo, 如果没 pdfinfo 用估算)
         $pages = 0
         try {
-            $info = & pdfinfo $Path 2>$null
+            $info = & pdfinfo $Path 2>&1
             $pageLine = $info | Where-Object { $_ -match '^Pages:\s+(\d+)' }
             if ($pageLine -match '^Pages:\s+(\d+)') { $pages = [int]$Matches[1] }
         } catch {}
@@ -213,6 +216,7 @@ function Get-PdfText {
     }
     finally {
         Remove-Item $tmp -ErrorAction SilentlyContinue
+        $ErrorActionPreference = $savedEAP
     }
 }
 
@@ -309,11 +313,15 @@ if (-not $DryRun -and -not (Test-Path $needsReviewLog)) {
     "sha12`tfilename`treason`ttimestamp" | Out-File $needsReviewLog -Encoding UTF8
 }
 
-$stats = @{ OK = 0; LOW_CONF = 0; SCHEMA_FAIL = 0; OLLAMA_FAIL = 0; SKIP_EXIST = 0 }
+$stats = @{ OK = 0; LOW_CONF = 0; SCHEMA_FAIL = 0; OLLAMA_FAIL = 0; SKIP_EXIST = 0; UNEXPECTED = 0 }
 $i = 0
 foreach ($pdf in $pdfs) {
     $i++
     Write-Host ("[{0}/{1}] {2}" -f $i, $pdfs.Count, $pdf.Name) -ForegroundColor Cyan
+
+    # 兜底: 任何没被内部 try 捕获的意外 (damaged PDF, IO error, etc.)
+    # 都在这里兜住, 写 needs-review 并继续下一份, 不能带崩整个 batch.
+    try {
 
     $sha12 = Get-Sha12 -Path $pdf.FullName
     $outJson = Join-Path $OutputDir "$sha12.json"
@@ -399,6 +407,16 @@ $($textData.Text)
             $stats.OK++
         }
     }
+
+    } catch {
+        Write-Host "  !!! 意外错误: $_" -ForegroundColor Red
+        if (-not $DryRun) {
+            $shaSafe = if ($sha12) { $sha12 } else { "unknown" }
+            "$shaSafe`t$($pdf.Name)`tunexpected: $_`t$(Get-Date -Format o)" | Add-Content $needsReviewLog -Encoding UTF8
+        }
+        $stats.UNEXPECTED++
+        continue
+    }
 }
 
 Write-Host ""
@@ -407,6 +425,7 @@ Write-Host ("  OK (高置信):   {0}" -f $stats.OK)
 Write-Host ("  低置信:        {0}  (进 needs-review)" -f $stats.LOW_CONF)
 Write-Host ("  schema 失败:   {0}" -f $stats.SCHEMA_FAIL)
 Write-Host ("  Ollama 失败:   {0}" -f $stats.OLLAMA_FAIL)
+Write-Host ("  意外错误:      {0}" -f $stats.UNEXPECTED)
 Write-Host ("  跳过已存在:    {0}" -f $stats.SKIP_EXIST)
 Write-Host ""
 if (-not $DryRun) {
