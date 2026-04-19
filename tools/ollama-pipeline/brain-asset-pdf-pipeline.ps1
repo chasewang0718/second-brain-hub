@@ -45,7 +45,7 @@ if ($Pilot) {
     Write-Host "=== PILOT ($n 份) ===" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "[1/3] Worker: 跑 $n 份生成 proposal ..." -ForegroundColor Yellow
-    & $worker -MaxItems $n -Model $Model
+    & $worker -Model $Model -MaxItems $n
     if ($LASTEXITCODE -ne 0) { Write-Host "worker 失败"; exit 1 }
     Write-Host ""
     Write-Host "[2/3] QA: 全部抽查 ..." -ForegroundColor Yellow
@@ -60,9 +60,11 @@ if ($Production) {
     Write-Host "=== PRODUCTION ===" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "[1/3] Worker: 跑全部 inbox PDF ..." -ForegroundColor Yellow
-    $wArgs = @("-Model", $Model)
-    if ($MaxItems -gt 0) { $wArgs += @("-MaxItems", $MaxItems) }
-    & $worker @wArgs
+    if ($MaxItems -gt 0) {
+        & $worker -Model $Model -MaxItems $MaxItems
+    } else {
+        & $worker -Model $Model
+    }
     if ($LASTEXITCODE -ne 0) { Write-Host "worker 失败"; exit 1 }
     Write-Host ""
     Write-Host "[2/3] QA 抽查 15% + 高风险类全抽 ..." -ForegroundColor Yellow
