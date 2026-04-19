@@ -24,6 +24,16 @@
 - why: 建立清晰的 tools/ config/ prompts/ schemas/ 分层
 - breaking: 用户 PS profile 的 \$BRAIN_TOOLS_ROOT 现指向新 hub; 所有 gollama-* / gasset-* / gbatch-* 已更新. brain-tools 旧仓库保留为安全备份, 稳定后可删
 
+## 2026-04-19 - config+docs: 通用云-本地委派策略 v1
+- what: 写 rules/cloud-local-delegation.md (策略, 人读) + config/task-router.yaml (路由表, 机器读)
+- why: 把"本地先跑 + 云端验收兜底"从 PDF 特例提升为**通用模式**, 未来 inbox-text/capsd/image 任务都走同一套机制
+- content:
+  * 3 种工作模式 (batch-pipeline / interactive / long-running-agent)
+  * 4 类升云触发器 (Quality / Complexity / Risk / Budget)
+  * 月度预算护栏 + 自动降级机制
+  * 反馈循环: escalation 结果回灌 few-shot, 准确率爬坡 vs 成本爬降
+- tasks configured: pdf-classify (已实现) + inbox-text-route, inbox-file-route, capsd-quick-fix, image-classify, code-refactor (未实现, 等 dispatcher 落地)
+
 ## 2026-04-19 - docs: 抽 D:\brain 规则类文件进 hub/rules
 - what: 复制 AGENTS.md -> rules/AGENTS.md, my-privacy-rules.md -> rules/privacy.md, brain-inbox-ingest.md -> rules/inbox-ingest.md, brain-tools-index.md -> hub/brain-tools-index.md
 - why: 规则内容中心化到 hub, 内容仓只保留内容
