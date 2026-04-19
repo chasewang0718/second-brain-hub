@@ -1,0 +1,41 @@
+# Runtime / logs
+telemetry/logs/*.jsonl
+telemetry/logs/*.log
+*.log
+gsave-log.txt
+
+# OS noise
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Temp
+*.tmp
+*.bak
+*.old
+
+# Credentials (defensive)
+.env
+.env.*
+*.pem
+*.key
+secrets/
+
+# Local overrides
+config/local.*.yaml
+local-config.*
+
+# Python (if used later)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node (if used later)
+node_modules/

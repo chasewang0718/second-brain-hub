@@ -1,0 +1,19 @@
+# PowerShell scripts must keep UTF-8 BOM for Windows PowerShell 5.1 compatibility
+*.ps1 text working-tree-encoding=UTF-8-BOM eol=crlf
+*.psm1 text working-tree-encoding=UTF-8-BOM eol=crlf
+*.psd1 text working-tree-encoding=UTF-8-BOM eol=crlf
+
+# AHK scripts
+*.ahk text eol=crlf
+
+# Markdown / YAML / JSON: LF is fine
+*.md text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+
+# Binary (should not appear in this repo, but guard)
+*.png binary
+*.jpg binary
+*.pdf binary
+*.zip binary
