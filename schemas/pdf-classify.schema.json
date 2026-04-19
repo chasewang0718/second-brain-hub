@@ -1,0 +1,120 @@
+﻿{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "brain-asset-pdf-classify-schema",
+  "description": "Ollama 本地模型对 PDF 分类的结构化输出规范",
+  "type": "object",
+  "required": [
+    "category",
+    "tier_a_dir",
+    "tier_b_dir",
+    "slug",
+    "title_zh",
+    "summary_zh",
+    "tags",
+    "sensitive",
+    "confidence"
+  ],
+  "properties": {
+    "category": {
+      "type": "string",
+      "enum": [
+        "invoice",
+        "tax",
+        "bank-statement",
+        "housing",
+        "identity",
+        "medical",
+        "contract",
+        "education",
+        "inburgering",
+        "business",
+        "certificate",
+        "picture-book",
+        "book",
+        "paper",
+        "latex-project",
+        "code-snippet",
+        "design",
+        "other"
+      ],
+      "description": "主分类, 一个 PDF 只能属于一个"
+    },
+    "subcategory": {
+      "type": "string",
+      "description": "更细分的标签, kebab-case, 如 ing-bank / belastingdienst-fiscal-rapport / childrens-mandarin-picture-book"
+    },
+    "tier_a_dir": {
+      "type": "string",
+      "description": "Tier A 指针卡放在 D:\\brain\\ 下的相对目录 (如 07-life/finance/invoices). 见 category-to-path.md"
+    },
+    "tier_b_dir": {
+      "type": "string",
+      "description": "Tier B 二进制 PDF 放在 D:\\brain-assets\\ 下的相对目录"
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,80}$",
+      "description": "kebab-case, 全英文/拼音, 不含空格/中文, 最长 80 字符, 用于文件名"
+    },
+    "title_zh": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 80,
+      "description": "人类可读中文标题, 或中英混合 (类似 'Forum Notariaat — 英文买方过户信 (2019-09)')"
+    },
+    "title_original": {
+      "type": "string",
+      "description": "PDF 里实际出现的主标题原文, 荷/英/中 都可以"
+    },
+    "summary_zh": {
+      "type": "string",
+      "minLength": 30,
+      "maxLength": 500,
+      "description": "中文摘要 3-6 句, 包含: 文档类型 / 主要内容 / 页数 / 日期 (如有) / 与用户相关的核心信息"
+    },
+    "tags": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 10,
+      "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,30}$" },
+      "description": "kebab-case 标签, 3-8 个, 中英混可 (如 tax, netherlands, inkomstenbelasting)"
+    },
+    "sensitive": {
+      "type": "boolean",
+      "description": "是否含个人可识别信息 (BSN/银行账号/完整地址/金额/他人姓名). 宁可保守 true."
+    },
+    "sensitive_items": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "触发 sensitive=true 的具体字段类型, 如 ['bsn', 'iban', 'home-address', 'salary']"
+    },
+    "related_hints": {
+      "type": "array",
+      "maxItems": 5,
+      "items": { "type": "string" },
+      "description": "建议的 [[wiki-link]] slug, 纯 slug 不带括号. 如 ['aangifte-inkomstenbelasting-2022-c-wang']"
+    },
+    "page_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "PDF 页数 (pdftotext 能读到就填)"
+    },
+    "language": {
+      "type": "string",
+      "enum": ["zh", "en", "nl", "mixed", "other"],
+      "description": "主要语言"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "模型对这份分类的把握. < 0.7 自动进 QA 人工池."
+    },
+    "reasoning_brief": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "1-2 句话说明为什么归到这个 category (方便 QA 判断)"
+    }
+  },
+  "additionalProperties": false
+}

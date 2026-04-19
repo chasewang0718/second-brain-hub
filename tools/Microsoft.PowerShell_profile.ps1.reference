@@ -1,0 +1,392 @@
+﻿#Requires -Version 5.1
+<#
+.SYNOPSIS
+    Chase 的 PowerShell 配置. brain / 开发工作流常用函数.
+
+.NOTES
+    修改此文件后, 打开新 PowerShell 窗口或运行 `. $PROFILE` 重新加载.
+    版本控制建议: 本文件未纳入 Git, 但 brain 里有一张概念卡记录用法
+    (01-concepts/workflow/inbox-ingest.md).
+
+    更新历史:
+    - 2026-04-18 初版: gsave / ginbox
+    - 2026-04-19 升级: inbox >= 10 自动触发 cursor-agent 整理 (Phase 0.5)
+    - 2026-04-19 重写: 文件意外消失, 重新生成 (内容不变)
+    - 2026-04-19 新增: brain-ask / g-ask / explain-this (Cursor CLI 日常化)
+#>
+
+# ============================================================
+# 配置
+# ============================================================
+
+$BRAIN_ROOT = "D:\brain"
+$BRAIN_INBOX = Join-Path $BRAIN_ROOT "99-inbox"
+$BRAIN_ASSETS_ROOT = "D:\brain-assets"
+$BRAIN_HUB_ROOT = "C:\dev-projects\second-brain-hub"
+$BRAIN_TOOLS_ROOT = $BRAIN_HUB_ROOT  # backward compat alias
+
+# inbox 累计多少条自动触发 cursor-agent 整理
+$BRAIN_AUTO_THRESHOLD = 10
+
+# cursor-agent CLI 位置 (2026-04-19 由 irm cursor.com/install 安装)
+$BRAIN_AGENT_CMD = "C:\Users\chase\AppData\Local\cursor-agent\agent.cmd"
+
+# 自动触发的锁文件和日志 (防止重复启动 + 留可查日志)
+$BRAIN_AUTO_LOCK = Join-Path $BRAIN_ROOT ".brain-autotrigger.lock"
+$BRAIN_AUTO_LOG = Join-Path $BRAIN_ROOT ".brain-autotrigger.log"
+
+# ============================================================
+# gsave : 把剪贴板内容存进 brain/99-inbox/
+# ============================================================
+function gsave {
+    [CmdletBinding()]
+    param()
+
+    if (-not (Test-Path $BRAIN_INBOX)) {
+        Write-Host "❌ Inbox 目录不存在: $BRAIN_INBOX" -ForegroundColor Red
+        Write-Host "   请先确认 brain 仓库已 clone 到 $BRAIN_ROOT" -ForegroundColor Yellow
+        return
+    }
+
+    $content = Get-Clipboard -Raw
+    if ([string]::IsNullOrWhiteSpace($content)) {
+        Write-Host "⚠️  剪贴板为空, 什么都没存" -ForegroundColor Yellow
+        return
+    }
+
+    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $fileName = "paste-$timestamp.md"
+    $filePath = Join-Path $BRAIN_INBOX $fileName
+
+    $header = @"
+---
+source: clipboard
+saved_at: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+status: unprocessed
+---
+
+"@
+    ($header + $content) | Out-File -FilePath $filePath -Encoding UTF8
+
+    $lineCount = ($content -split "`n").Count
+    $charCount = $content.Length
+    Write-Host "✅ 已存入 inbox: " -ForegroundColor Green -NoNewline
+    Write-Host $fileName -ForegroundColor Cyan
+    Write-Host "   $lineCount 行 / $charCount 字符" -ForegroundColor DarkGray
+
+    # 计数 + 阈值判断
+    $pasteCount = @(Get-ChildItem $BRAIN_INBOX -Filter "paste-*.md").Count
+
+    if ($pasteCount -ge $BRAIN_AUTO_THRESHOLD) {
+        Write-Host "   inbox: " -NoNewline -ForegroundColor DarkGray
+        Write-Host "$pasteCount 条" -NoNewline -ForegroundColor Yellow
+        Write-Host " (≥ $BRAIN_AUTO_THRESHOLD, 触发自动整理)" -ForegroundColor Yellow
+        Invoke-BrainAutoTrigger
+    }
+    elseif ($pasteCount -ge ($BRAIN_AUTO_THRESHOLD - 2)) {
+        Write-Host "   inbox: " -NoNewline -ForegroundColor DarkGray
+        Write-Host "$pasteCount 条" -NoNewline -ForegroundColor Cyan
+        Write-Host " (还差 $($BRAIN_AUTO_THRESHOLD - $pasteCount) 条触发自动整理)" -ForegroundColor DarkGray
+    }
+    else {
+        Write-Host "   inbox 当前 $pasteCount 条" -ForegroundColor DarkGray
+    }
+}
+
+# ============================================================
+# ginbox : 查看当前 inbox 状态
+# ============================================================
+function ginbox {
+    if (-not (Test-Path $BRAIN_INBOX)) {
+        Write-Host "❌ Inbox 目录不存在" -ForegroundColor Red
+        return
+    }
+    $files = Get-ChildItem $BRAIN_INBOX -File | Where-Object { $_.Name -ne "README.md" }
+    $pasteCount = @($files | Where-Object { $_.Name -like "paste-*.md" }).Count
+
+    if ($files.Count -eq 0) {
+        Write-Host "📭 Inbox 是空的" -ForegroundColor Green
+    }
+    else {
+        Write-Host "📬 Inbox 当前有 $($files.Count) 个文件 (其中 paste-*.md: $pasteCount):" -ForegroundColor Cyan
+
+        $progressColor = if ($pasteCount -ge $BRAIN_AUTO_THRESHOLD) { "Yellow" }
+        elseif ($pasteCount -ge ($BRAIN_AUTO_THRESHOLD - 2)) { "Cyan" }
+        else { "DarkGray" }
+        Write-Host "   auto-trigger 阈值: $pasteCount / $BRAIN_AUTO_THRESHOLD" -ForegroundColor $progressColor
+
+        if (Test-Path $BRAIN_AUTO_LOCK) {
+            $lockAge = (Get-Date) - (Get-Item $BRAIN_AUTO_LOCK).LastWriteTime
+            Write-Host "   🔒 auto-trigger 运行中 ($([Math]::Round($lockAge.TotalMinutes, 1))m)" -ForegroundColor Magenta
+        }
+
+        Write-Host ""
+        $files | Sort-Object LastWriteTime -Descending | ForEach-Object {
+            $age = (Get-Date) - $_.LastWriteTime
+            $ageStr = if ($age.TotalMinutes -lt 60) { "$([Math]::Round($age.TotalMinutes))m前" }
+            elseif ($age.TotalHours -lt 24) { "$([Math]::Round($age.TotalHours))h前" }
+            else { "$([Math]::Round($age.TotalDays))d前" }
+            Write-Host ("   {0,-45} {1,8}" -f $_.Name, $ageStr) -ForegroundColor Gray
+        }
+    }
+}
+
+# ============================================================
+# Invoke-BrainAutoTrigger : 后台启动 cursor-agent 整理 inbox
+# ============================================================
+function Invoke-BrainAutoTrigger {
+    if (Test-Path $BRAIN_AUTO_LOCK) {
+        $lockAge = (Get-Date) - (Get-Item $BRAIN_AUTO_LOCK).LastWriteTime
+        if ($lockAge.TotalMinutes -lt 15) {
+            Write-Host "   (auto-trigger 已在运行, 跳过. 看进度: Get-Content '$BRAIN_AUTO_LOG' -Wait -Tail 20)" -ForegroundColor DarkGray
+            return
+        }
+        Remove-Item $BRAIN_AUTO_LOCK -Force -ErrorAction SilentlyContinue
+    }
+
+    if (-not (Test-Path $BRAIN_AGENT_CMD)) {
+        Write-Host "⚠️  cursor-agent CLI 未安装, 跳过自动整理" -ForegroundColor Yellow
+        Write-Host "   安装: irm 'https://cursor.com/install?win32=true' | iex" -ForegroundColor DarkGray
+        return
+    }
+
+    New-Item $BRAIN_AUTO_LOCK -ItemType File -Force | Out-Null
+
+    $scriptFile = Join-Path $env:TEMP "brain-autotrigger-$(Get-Random).ps1"
+    $scriptContent = @"
+`$ErrorActionPreference = 'Continue'
+Set-Location '$BRAIN_ROOT'
+
+'=== ' + (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') + ' auto-trigger start ===' | Out-File '$BRAIN_AUTO_LOG' -Append -Encoding UTF8
+
+try {
+    & '$BRAIN_AGENT_CMD' -p --force --trust --workspace '$BRAIN_ROOT' '整理 inbox (自动触发, paste-*.md ≥ $BRAIN_AUTO_THRESHOLD)' *>&1 | Out-File '$BRAIN_AUTO_LOG' -Append -Encoding UTF8
+}
+catch {
+    ('ERROR: ' + `$_.Exception.Message) | Out-File '$BRAIN_AUTO_LOG' -Append -Encoding UTF8
+}
+finally {
+    '=== ' + (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') + ' auto-trigger done ===' | Out-File '$BRAIN_AUTO_LOG' -Append -Encoding UTF8
+    Remove-Item '$BRAIN_AUTO_LOCK' -Force -ErrorAction SilentlyContinue
+    Remove-Item '$PSCommandPath' -Force -ErrorAction SilentlyContinue
+}
+"@
+    $scriptContent | Out-File $scriptFile -Encoding UTF8
+
+    Start-Process powershell -ArgumentList @(
+        "-NoProfile",
+        "-WindowStyle", "Hidden",
+        "-ExecutionPolicy", "Bypass",
+        "-File", $scriptFile
+    ) -WindowStyle Hidden
+
+    Write-Host "🤖 auto-trigger 已启动 (后台 agent 正在整理 inbox)" -ForegroundColor Magenta
+    Write-Host "   看进度:   Get-Content '$BRAIN_AUTO_LOG' -Wait -Tail 20" -ForegroundColor DarkGray
+    Write-Host "   状态检查: ginbox (看锁状态)" -ForegroundColor DarkGray
+}
+
+# ============================================================
+# gclean : 手动触发一次 inbox 整理 (不等阈值)
+# ============================================================
+function gclean {
+    Write-Host "手动触发 inbox 整理..." -ForegroundColor Cyan
+    Invoke-BrainAutoTrigger
+}
+
+# ============================================================
+# gclean-log : 查看最近一次 auto-trigger 日志
+# ============================================================
+function gclean-log {
+    param([int]$Tail = 50)
+    if (Test-Path $BRAIN_AUTO_LOG) {
+        Get-Content $BRAIN_AUTO_LOG -Tail $Tail
+    }
+    else {
+        Write-Host "还没有 auto-trigger 日志" -ForegroundColor DarkGray
+    }
+}
+
+# ============================================================
+# brain-ask : 只读语义查询 brain 仓库
+# ============================================================
+function brain-ask {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, ValueFromRemainingArguments = $true)]
+        [string[]]$Query
+    )
+
+    if (-not (Test-Path $BRAIN_AGENT_CMD)) {
+        Write-Host "❌ cursor-agent 未安装" -ForegroundColor Red
+        return
+    }
+
+    $q = $Query -join " "
+    $prompt = @"
+你在只读模式查询 brain 仓库 (D:\brain)。
+
+【严格禁令】绝对不要创建/修改/删除任何文件, 不要 git add/commit/push,
+不要写入 00-memory/, 不要碰 99-inbox/。本次任务只是搜索 + 回答。
+
+用户问题: $q
+
+请按以下结构输出:
+
+## 相关文件 (最多 5 个)
+- 文件路径 — 1-2 行为什么相关
+
+## 直接回答
+3-8 行中文, 引用具体文件/笔记作为依据.
+如果信息不足, 直接说"brain 里没找到, 建议..."
+
+## 相邻线索 (可选)
+可能相关但不直接命中的 1-2 条.
+"@
+
+    Write-Host "🔍 brain-ask: $q" -ForegroundColor DarkCyan
+    & $BRAIN_AGENT_CMD -p --force --trust --workspace $BRAIN_ROOT $prompt
+}
+
+# ============================================================
+# g-ask : 通用一次性问题 (不限定 brain)
+# ============================================================
+function g-ask {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, ValueFromRemainingArguments = $true)]
+        [string[]]$Query
+    )
+
+    if (-not (Test-Path $BRAIN_AGENT_CMD)) {
+        Write-Host "❌ cursor-agent 未安装" -ForegroundColor Red
+        return
+    }
+
+    $q = $Query -join " "
+    Write-Host "💬 g-ask: $q" -ForegroundColor DarkCyan
+    & $BRAIN_AGENT_CMD -p --force --trust $q
+}
+
+# ============================================================
+# explain-this : 管道版快速解释 (git log, error log, yaml 等)
+# ============================================================
+function explain-this {
+    [CmdletBinding()]
+    param(
+        [Parameter(ValueFromPipeline = $true)]
+        [string[]]$InputText,
+
+        [Parameter(Position = 0)]
+        [string]$Instruction = "用大白话解释这段内容, 3-5 行中文, 直接说核心, 避免废话"
+    )
+
+    begin { $buf = @() }
+    process { if ($InputText) { $buf += $InputText } }
+    end {
+        $text = ($buf -join "`n").Trim()
+        if ([string]::IsNullOrWhiteSpace($text)) {
+            Write-Host "⚠️  请通过管道喂数据, 例如:" -ForegroundColor Yellow
+            Write-Host "   git log -1 --stat | explain-this" -ForegroundColor DarkGray
+            Write-Host "   cat error.log | explain-this '找出错误根因'" -ForegroundColor DarkGray
+            return
+        }
+
+        if (-not (Test-Path $BRAIN_AGENT_CMD)) {
+            Write-Host "❌ cursor-agent 未安装" -ForegroundColor Red
+            return
+        }
+
+        $prompt = "$Instruction`n`n--- 内容开始 ---`n$text`n--- 内容结束 ---"
+        Write-Host "🔎 explain-this ($($text.Length) 字符)" -ForegroundColor DarkCyan
+        & $BRAIN_AGENT_CMD -p --force --trust $prompt
+    }
+}
+
+# ============================================================
+# gasset : 看 brain-assets 现状
+# ============================================================
+function gasset {
+    if (-not (Test-Path $BRAIN_ASSETS_ROOT)) {
+        Write-Host "❌ $BRAIN_ASSETS_ROOT 不存在" -ForegroundColor Red; return
+    }
+    Write-Host "📦 brain-assets @ $BRAIN_ASSETS_ROOT" -ForegroundColor Cyan
+    $dirs = Get-ChildItem $BRAIN_ASSETS_ROOT -Directory | Sort-Object Name
+    foreach ($d in $dirs) {
+        $files = Get-ChildItem $d.FullName -Recurse -File -ErrorAction SilentlyContinue
+        $sz = if ($files) { [Math]::Round(($files | Measure-Object Length -Sum).Sum / 1MB, 1) } else { 0 }
+        Write-Host ("  {0,-18} {1,6} 文件  {2,9} MB" -f $d.Name, $files.Count, $sz) -ForegroundColor Gray
+    }
+    $total = Get-ChildItem $BRAIN_ASSETS_ROOT -Recurse -File -ErrorAction SilentlyContinue
+    $totalSz = if ($total) { [Math]::Round(($total | Measure-Object Length -Sum).Sum / 1GB, 2) } else { 0 }
+    Write-Host "  ────────────────────────────────────" -ForegroundColor DarkGray
+    Write-Host ("  {0,-18} {1,6} 文件  {2,9} GB" -f "合计", $total.Count, $totalSz) -ForegroundColor Cyan
+}
+
+# ============================================================
+# gasset-scan : Stage 1 扫描 (0 token, 生成 manifest)
+# ============================================================
+function gasset-scan {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, Position = 0)]
+        [string]$Source,
+        [string]$JobName
+    )
+    $script = Join-Path $BRAIN_TOOLS_ROOT "powershell\brain-asset-migrate.ps1"
+    if (-not (Test-Path $script)) {
+        Write-Host "❌ 找不到 $script" -ForegroundColor Red; return
+    }
+    if ($JobName) {
+        & $script -Source $Source -JobName $JobName
+    }
+    else {
+        & $script -Source $Source
+    }
+}
+
+# ============================================================
+# gasset-migrate : Stage 3 执行 (按 manifest copy)
+# ============================================================
+function gasset-migrate {
+    [CmdletBinding()]
+    param([string]$ManifestPath)
+    $script = Join-Path $BRAIN_TOOLS_ROOT "powershell\brain-asset-migrate.ps1"
+    if ($ManifestPath) {
+        & $script -Execute -ManifestPath $ManifestPath
+    }
+    else {
+        & $script -Execute
+    }
+}
+
+# ============================================================
+# 启动提示
+# ============================================================
+if ($Host.Name -eq "ConsoleHost") {
+    Write-Host "💡 brain: " -ForegroundColor DarkCyan -NoNewline
+    Write-Host "gsave" -ForegroundColor Cyan -NoNewline
+    Write-Host " " -NoNewline
+    Write-Host "ginbox" -ForegroundColor Cyan -NoNewline
+    Write-Host " " -NoNewline
+    Write-Host "gclean" -ForegroundColor Cyan -NoNewline
+    Write-Host " " -NoNewline
+    Write-Host "gclean-log" -ForegroundColor Cyan
+    Write-Host "   agent: " -ForegroundColor DarkCyan -NoNewline
+    Write-Host "brain-ask" -ForegroundColor Cyan -NoNewline
+    Write-Host " '问题' (只读查 brain)   " -ForegroundColor DarkGray -NoNewline
+    Write-Host "g-ask" -ForegroundColor Cyan -NoNewline
+    Write-Host " '问题' (通用问答)" -ForegroundColor DarkGray
+    Write-Host "          " -NoNewline
+    Write-Host "... | explain-this" -ForegroundColor Cyan -NoNewline
+    Write-Host " (管道版解释)" -ForegroundColor DarkGray
+    Write-Host "   assets: " -ForegroundColor DarkCyan -NoNewline
+    Write-Host "gasset" -ForegroundColor Cyan -NoNewline
+    Write-Host " (现状)  " -ForegroundColor DarkGray -NoNewline
+    Write-Host "gasset-scan <path>" -ForegroundColor Cyan -NoNewline
+    Write-Host " (扫描)  " -ForegroundColor DarkGray -NoNewline
+    Write-Host "gasset-migrate" -ForegroundColor Cyan -NoNewline
+    Write-Host " (执行)" -ForegroundColor DarkGray
+    Write-Host "   auto-trigger: " -ForegroundColor DarkGray -NoNewline
+    Write-Host "paste-*.md ≥ $BRAIN_AUTO_THRESHOLD" -ForegroundColor Yellow -NoNewline
+    Write-Host " 自动启动 cursor-agent" -ForegroundColor DarkGray
+}

@@ -1,10 +1,12 @@
-# PowerShell scripts must keep UTF-8 BOM for Windows PowerShell 5.1 compatibility
-*.ps1 text working-tree-encoding=UTF-8-BOM eol=crlf
-*.psm1 text working-tree-encoding=UTF-8-BOM eol=crlf
-*.psd1 text working-tree-encoding=UTF-8-BOM eol=crlf
+# PowerShell scripts: 按字节原样存储 (含 UTF-8 BOM, 保护中文).
+# 不用 working-tree-encoding=UTF-8-BOM - 那会做编码转换, 遇非法 UTF-8 字节就炸.
+# binary 属性阻止 git 做任何 CRLF/编码转换, 原样 commit.
+*.ps1 -text
+*.psm1 -text
+*.psd1 -text
 
-# AHK scripts
-*.ahk text eol=crlf
+# AHK 同理
+*.ahk -text
 
 # Markdown / YAML / JSON: LF is fine
 *.md text eol=lf
