@@ -1,108 +1,61 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Reusable notification helpers: Windows toast + audio beep.
-    Designed to be dot-sourced by watchdogs, batch jobs, etc.
+    Silent notification helpers: Windows MessageBox only, no sound.
+
+.DESCRIPTION
+    设计意图: 用户睡觉时不要被打扰. 所有通知:
+        - 无声音 (无 beep, 无系统音)
+        - MessageBox 是非阻塞的 (另起 PS 进程弹, 不卡 watchdog)
+        - 屏幕锁着不会强行点亮, 早上解锁才看到
 
 .EXAMPLE
     . .\notify.ps1
-    Show-BrainToast -Title "Production done" -Message "655/655 OK"
-    Invoke-BrainBeep -Pattern 'alert'   # loud multi-tone, for waking user
-    Invoke-BrainBeep -Pattern 'done'    # pleasant two-tone
+    Send-BrainAlert -Title "PDF Production 完成" -Message "654/655, 重启 0 次"
 #>
 
-function Show-BrainToast {
+function Show-BrainMessageBox {
     <#
     .SYNOPSIS
-        Windows 10+ toast via native WinRT API. No 3rd-party module.
-        Silently falls back to nothing on systems without WinRT.
+        静默 MessageBox (icon=None = 无系统音). 非阻塞: 启子进程显示, 主 watchdog 继续跑.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string]$Title,
-        [Parameter(Mandatory)] [string]$Message,
-        [string]$AppId = 'Brain.SecondBrainHub'
+        [Parameter(Mandatory)] [string]$Message
     )
     try {
-        $escTitle = [System.Security.SecurityElement]::Escape($Title)
-        $escMsg   = [System.Security.SecurityElement]::Escape($Message)
-        $xml = @"
-<toast>
-    <visual>
-        <binding template="ToastGeneric">
-            <text>$escTitle</text>
-            <text>$escMsg</text>
-        </binding>
-    </visual>
-</toast>
-"@
-        [void][Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType=WindowsRuntime]
-        [void][Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType=WindowsRuntime]
-        $xmlDoc = New-Object Windows.Data.Xml.Dom.XmlDocument
-        $xmlDoc.LoadXml($xml)
-        $toast = [Windows.UI.Notifications.ToastNotification]::new($xmlDoc)
-        [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($AppId).Show($toast)
+        # 经过转义的单引号, 避免 $Message 含 ' 时 PS 命令串崩
+        $escTitle = $Title -replace "'", "''"
+        $escMsg   = $Message -replace "'", "''"
+        $cmd = "Add-Type -AssemblyName PresentationFramework; " +
+               "`$null = [System.Windows.MessageBox]::Show('$escMsg','$escTitle','OK','None')"
+        Start-Process powershell.exe `
+            -ArgumentList @('-NoProfile','-WindowStyle','Hidden','-Command', $cmd) `
+            -WindowStyle Hidden | Out-Null
         return $true
     } catch {
-        Write-Warning "Toast 失败 (WinRT 不可用?): $_"
+        Write-Warning "MessageBox 失败: $_"
         return $false
-    }
-}
-
-function Invoke-BrainBeep {
-    <#
-    .SYNOPSIS
-        Audio alert. Patterns:
-          - 'alert' : 3 loud tones, for crashes (tries to wake user)
-          - 'warn'  : 2 medium tones, for stall warnings
-          - 'done'  : 2 pleasant tones, for completion
-    #>
-    [CmdletBinding()]
-    param([ValidateSet('alert','warn','done')] [string]$Pattern = 'alert')
-
-    $tones = switch ($Pattern) {
-        'alert' { @(@(1200,400), @(800,400), @(1200,400), @(800,400), @(1200,600)) }
-        'warn'  { @(@(900,300), @(700,300)) }
-        'done'  { @(@(700,200), @(1000,400)) }
-    }
-
-    try {
-        foreach ($t in $tones) {
-            [console]::Beep($t[0], $t[1])
-            Start-Sleep -Milliseconds 80
-        }
-        return $true
-    } catch {
-        # [console]::Beep may fail in GUI-only contexts. Fallback: system sound.
-        try {
-            $wav = if ($Pattern -eq 'done') {
-                "$env:WINDIR\Media\tada.wav"
-            } else {
-                "$env:WINDIR\Media\Alarm01.wav"
-            }
-            if (Test-Path $wav) {
-                $player = New-Object Media.SoundPlayer $wav
-                $player.PlaySync()
-            }
-            return $true
-        } catch {
-            Write-Warning "Beep + SoundPlayer 都失败: $_"
-            return $false
-        }
     }
 }
 
 function Send-BrainAlert {
     <#
     .SYNOPSIS
-        Combined toast + audio + log-file append. Main entry point for watchdogs.
+        静默通知: MessageBox + alert log. 永不发声.
+
+    .PARAMETER Popup
+        若 $false, 只写 alert log, 不弹 MessageBox (中途事件用).
+        若 $true (默认), 同时弹 MessageBox (最终结局用).
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string]$Title,
         [Parameter(Mandatory)] [string]$Message,
         [ValidateSet('alert','warn','done','info')] [string]$Severity = 'alert',
-        [string]$AlertLogFile
+        [string]$AlertLogFile,
+        [bool]$Popup = $true
     )
 
     $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
@@ -115,12 +68,7 @@ function Send-BrainAlert {
         try { $line | Add-Content -Path $AlertLogFile -Encoding UTF8 } catch {}
     }
 
-    [void](Show-BrainToast -Title $Title -Message $Message)
-
-    if ($Severity -ne 'info') {
-        $beepPattern = switch ($Severity) {
-            'alert' { 'alert' }; 'warn' { 'warn' }; 'done' { 'done' }
-        }
-        [void](Invoke-BrainBeep -Pattern $beepPattern)
+    if ($Popup) {
+        [void](Show-BrainMessageBox -Title $Title -Message $Message)
     }
 }

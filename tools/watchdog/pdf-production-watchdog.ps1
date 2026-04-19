@@ -121,8 +121,8 @@ Write-WdLog "  CheckInterval   : $CheckIntervalSec s"
 Write-WdLog "  WatchdogDir     : $WatchdogDir"
 
 Send-BrainAlert -Title 'Watchdog 上岗' `
-                -Message "盯 PDF production. 最多自动重启 $MaxRestarts 次, 卡 $StallMinutes min 报警." `
-                -Severity info -AlertLogFile $alertLog
+                -Message "盯 PDF production. 最多自动重启 $MaxRestarts 次, 卡 $StallMinutes min 记 log." `
+                -Severity info -AlertLogFile $alertLog -Popup $false
 
 while ($true) {
     $state = Read-PipelineState
@@ -143,12 +143,12 @@ while ($true) {
     }
     $sinceWriteMin = if ($logMtime) { [math]::Round(($now - $logMtime).TotalMinutes, 1) } else { -1 }
 
-    # ---- 成功分支 ----
+    # ---- 成功分支 (最终结局 → 弹窗) ----
     if ($progress.Done) {
         $elapsedHr = [math]::Round(($now - $startedAt).TotalHours, 2)
-        Send-BrainAlert -Title '✅ PDF Production 完成' `
+        Send-BrainAlert -Title 'PDF Production 完成' `
             -Message "共 $($progress.N)/$($progress.Total), 用时 $elapsedHr 小时, 重启 $restartCount 次. 去跑 QA+apply." `
-            -Severity done -AlertLogFile $alertLog
+            -Severity done -AlertLogFile $alertLog -Popup $true
         Write-WdLog "=== 完成, 退出 watchdog ===" Green
         @{ exit_reason = 'success'; n = $progress.N; total = $progress.Total; restarts = $restartCount; ended_at = $now.ToString('o') } `
             | ConvertTo-Json | Out-File $stateFile -Encoding UTF8
@@ -160,9 +160,10 @@ while ($true) {
         Write-WdLog "!! PID $($state.Pid) DEAD (进度 $($progress.N)/$($progress.Total))" Red
 
         if ($restartCount -ge $MaxRestarts) {
-            Send-BrainAlert -Title '🚨 PDF Production 崩了 (已耗尽重启)' `
-                -Message "PID $($state.Pid) 死, 已重启 $restartCount/$MaxRestarts 次, 停止自动重启. 进度 $($progress.N)/$($progress.Total). 查看 $($state.LogPath) 和 alerts.log." `
-                -Severity alert -AlertLogFile $alertLog
+            # 最终结局 → 弹窗 (早上解锁会看到)
+            Send-BrainAlert -Title 'PDF Production 崩了 (已耗尽重启)' `
+                -Message "PID $($state.Pid) 死, 已重启 $restartCount/$MaxRestarts 次, 停止自动重启. 进度 $($progress.N)/$($progress.Total). 查看 alerts.log 和 $($state.LogPath)." `
+                -Severity alert -AlertLogFile $alertLog -Popup $true
             @{ exit_reason = 'max_restarts_exceeded'; n = $progress.N; total = $progress.Total; restarts = $restartCount; ended_at = $now.ToString('o') } `
                 | ConvertTo-Json | Out-File $stateFile -Encoding UTF8
             Write-WdLog "=== 耗尽重启额度, watchdog 退出 (等人工) ===" Red
@@ -170,9 +171,10 @@ while ($true) {
         }
 
         $restartCount++
-        Send-BrainAlert -Title "⚠️ PDF Production 崩, 自动重启 $restartCount/$MaxRestarts" `
+        # 中途事件 → 只记 log, 不弹窗 (睡觉时不打扰)
+        Send-BrainAlert -Title "PDF Production 崩, 自动重启 $restartCount/$MaxRestarts" `
             -Message "PID $($state.Pid) 死于 $($progress.N)/$($progress.Total). 正在重启." `
-            -Severity warn -AlertLogFile $alertLog
+            -Severity warn -AlertLogFile $alertLog -Popup $false
 
         try {
             $newPid = Restart-Pipeline
@@ -184,8 +186,9 @@ while ($true) {
                 Write-WdLog "  !! 重启后进程立刻退出, 5 秒后轮询会再 crash 路径处理" Red
             }
         } catch {
-            Send-BrainAlert -Title '🚨 重启本身失败' `
-                -Message "Start-Process 抛异常: $_" -Severity alert -AlertLogFile $alertLog
+            # 重启失败是中途事件 (下次轮询会再试), 只记 log
+            Send-BrainAlert -Title '重启本身失败' `
+                -Message "Start-Process 抛异常: $_" -Severity alert -AlertLogFile $alertLog -Popup $false
             Write-WdLog "重启失败: $_" Red
         }
 
@@ -193,13 +196,12 @@ while ($true) {
         continue
     }
 
-    # ---- 进程活着, 但检查是否卡住 ----
+    # ---- 进程活着, 但检查是否卡住 (中途事件 → 只记 log) ----
     if ($sinceWriteMin -gt $StallMinutes) {
         Write-WdLog "!? PID $($state.Pid) 活但卡住: log $sinceWriteMin 分钟没动, 进度 $($progress.N)/$($progress.Total)" Yellow
-        # 只通知, 不杀 (可能在处理大 PDF)
-        Send-BrainAlert -Title "⏸ PDF Production 卡住?" `
-            -Message "PID $($state.Pid) 活, 但 log $sinceWriteMin 分钟没更新. 进度 $($progress.N)/$($progress.Total). 自己判断." `
-            -Severity warn -AlertLogFile $alertLog
+        Send-BrainAlert -Title "PDF Production 疑卡住" `
+            -Message "PID $($state.Pid) 活, 但 log $sinceWriteMin 分钟没更新. 进度 $($progress.N)/$($progress.Total)." `
+            -Severity warn -AlertLogFile $alertLog -Popup $false
     }
 
     # ---- 心跳 (每 30 min) ----
