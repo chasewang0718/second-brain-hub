@@ -39,3 +39,11 @@
 - why: 规则内容中心化到 hub, 内容仓只保留内容
 - strategy: hub 副本标为权威 (authoritative_at), D:\brain 原件标为 mirror, 保留以便 Cursor 自动加载. 待 brain-content 迁移时统一处理
 - breaking: 无 (原文件原位未删, agent 加载行为不变)
+
+## 2026-04-19 - docs: 12-18 月 roadmap + Phase 1 详细任务单
+- what: 写 ROADMAP.md (9 Phase 路线图到 "完全形态" 的外脑系统) + architecture/phase-1-plan.md (Phase 1 的 7 个子任务, 共 ~16h)
+- why: 把长期愿景 (Personal Agentic IDP with Local-First Model Cascade) 固化下来, 锁定执行节奏
+- scope:
+  * ROADMAP: 项目定性 + 难度分布 + 技术风险 + 9 个 Phase + 技术栈决策 + 不做什么
+  * Phase 1 任务: telemetry 打点, escalation 结构化, feedback harvester, task-router 运行时读取, golden set v1 (20 份), eval runner, 月度成本报告
+- principle: 每个 Phase 自成闭环. Phase 1 退出标志 = "每周低置信率" 可绘制成下降曲线
