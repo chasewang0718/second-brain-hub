@@ -493,6 +493,7 @@ Monica/Dex 式人际关系助手.
 | 2026-04-21 | — | **Dry-run ingest**: `tools/py/scripts/verify_ingest_dry_run.py`（可选 `VERIFY_WECHAT_DECODER`）；MCP `cloud_queue_list_tool`、`ios_backup_locate_preview`、`wechat_sync_preview`。 |
 | 2026-04-21 | — | **A3 图像分支**: `brain_agents/image_inbox.py` + `brain image-inbox-ingest [--path ...] [--no-copy]`；paddleocr 懒加载且可选（未安装时写 `ocr_status: pending` 指针卡 + `_cursor_queue/` 兜底任务）；`config/paths.yaml` 新增 `image_inbox_dir`；6 个 pytest 用例（全量 36 个）。 |
 | 2026-04-21 | — | **A3 音频分支**: `brain_agents/audio_inbox.py` + `brain audio-inbox-ingest [--path ...] [--no-copy]`；faster-whisper 懒加载（`BRAIN_ASR_MODEL` / `BRAIN_ASR_LANG` 可调；未安装写 `asr_status: pending` 指针卡 + cursor_queue 兜底）；`config/paths.yaml` 新增 `audio_inbox_dir`；6 个 pytest 用例（全量 42 个）。 |
+| 2026-04-21 | — | **Caps+D 统一分派**: 新增 `tools/ps/brain-caps-d-dispatch.ps1`（`Invoke-BrainCapsDSave` 按扩展名批量分派到 pdf/image/audio CLI，未识别/无文件降级到文本分支）；`.reference` profile 里 `gsave` 现以一行 dot-source + 一行 `if(...) return` 接入三件套；pytest `test_caps_d_dispatch_sync.py` 4 用例锁定 PS 表与 Python `SUPPORTED_EXT` 同步（全量 46 个）。 |
 
 ---
 

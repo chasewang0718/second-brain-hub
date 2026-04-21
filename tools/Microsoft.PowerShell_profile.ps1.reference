@@ -38,9 +38,19 @@ $BRAIN_AUTO_LOG = Join-Path $BRAIN_ROOT ".brain-autotrigger.log"
 # ============================================================
 # gsave : 把剪贴板内容存进 brain/99-inbox/
 # ============================================================
+# 2026-04-21 A3 multimedia: 先问文件分派脚本, 命中 (PDF/image/audio) 就直接走
+# `brain *-inbox-ingest`; 否则走文本分支 (paste-*.md).
+# 真实实现在: tools/ps/brain-caps-d-dispatch.ps1 (已 dot-source 到 session)
+. "C:\dev-projects\second-brain-hub\tools\ps\brain-caps-d-dispatch.ps1"
+
 function gsave {
     [CmdletBinding()]
     param()
+
+    # --- A3 分派: 若剪贴板是文件列表, Invoke-BrainCapsDSave 会分流到 3 个 CLI ---
+    if (Invoke-BrainCapsDSave) {
+        return
+    }
 
     if (-not (Test-Path $BRAIN_INBOX)) {
         Write-Host "❌ Inbox 目录不存在: $BRAIN_INBOX" -ForegroundColor Red
