@@ -28,11 +28,75 @@ ALIASES: dict[str, list[str]] = {
     "混合": ["hybrid", "fusion", "rerank"],
     "队列": ["queue", "cursor_queue", "escalation"],
     "兜底": ["fallback", "queue", "cursor_queue"],
+    "mcp": ["fastmcp", "brain-mcp", "mcp.json"],
+    "paths": ["paths.yaml", "config/paths"],
 }
 
 
 def _content_root() -> Path:
     return Path(load_paths_config()["paths"]["content_root"])
+
+
+def _intent_extra_terms(query: str) -> list[str]:
+    """High-recall English tokens for rg when Chinese query implies a hub/content topic."""
+    q = query.lower()
+    extra: list[str] = []
+    if any(c in query for c in ("谁", "联系", "天")) or "40" in query:
+        extra.extend(["overdue", "digest", "06-people", "contact"])
+    if "cursor" in q or "兜底" in query or "队列" in query:
+        extra.extend(["_cursor_queue", "cursor-delegated", "escalation"])
+    if "写作" in query or "banned" in q or "约束" in query:
+        extra.extend(["constraints", "writing", "banned", "yaml"])
+    if "mcp" in q or "paths" in q or "配置" in query:
+        extra.extend(["mcp", "paths", "fastmcp", "config"])
+    out: list[str] = []
+    for t in extra:
+        if t and t not in out:
+            out.append(t)
+    return out[:12]
+
+
+def _preview_snippet(text: str, terms: list[str], query: str, max_len: int = 420) -> str:
+    """Prefer a snippet around the strongest matched term so previews surface real hits (not just file headers)."""
+    plain = text.replace("\r\n", "\n").replace("\r", "\n")
+    low = plain.lower()
+    ql = query.lower()
+    priority: list[str] = []
+    if "写作" in query or "banned" in ql or "约束" in query:
+        priority.extend(["config", "yaml", "constraints", "banned", "writing-constraints"])
+    if "mcp" in ql or "paths" in ql:
+        priority.extend(["fastmcp", "mcp", "paths.yaml", "config/paths"])
+    ranked = [t for t in priority if t in low and len(t) >= 2]
+    ranked.extend(t for t in sorted((t for t in terms if len(t) >= 2), key=len, reverse=True) if t not in ranked)
+    for term in ranked:
+        pos = low.find(term.lower())
+        if pos >= 0:
+            start = max(0, pos - 120)
+            end = min(len(plain), start + max_len)
+            snippet = plain[start:end]
+            one_line = " ".join(snippet.replace("\n", " ").split())
+            return one_line[:max_len]
+    one_line = " ".join(plain.replace("\n", " ").split())
+    return one_line[:max_len]
+
+
+def _intent_path_bonus(query: str, path: Path, base_score: float) -> float:
+    """Prefer obviously relevant directories when the query intent matches."""
+    s = str(path).replace("\\", "/").lower()
+    bonus = 0.0
+    if any(c in query for c in ("谁", "联系")) or "overdue" in query.lower():
+        if "digest" in s or "06-people" in s or "people" in s:
+            bonus += 12.0
+    if "cursor" in query.lower() or "兜底" in query:
+        if "agents" in s or "cursor" in s or "queue" in s:
+            bonus += 10.0
+    if "写作" in query or "banned" in query.lower():
+        if "workflow" in s or "brain-tools-index" in s or "concept" in s:
+            bonus += 8.0
+    if "mcp" in query.lower() or "paths" in query.lower():
+        if "journal" in s or "workflow" in s or "memory" in s or "agents" in s:
+            bonus += 6.0
+    return base_score + bonus
 
 
 def _terms(query: str) -> list[str]:
@@ -61,12 +125,15 @@ def _terms(query: str) -> list[str]:
 
 def _keyword_hits(query: str, limit: int) -> list[dict[str, Any]]:
     terms = _terms(query)
+    for t in _intent_extra_terms(query):
+        if t not in terms:
+            terms.append(t)
     if not terms:
         return []
     term_weight = {t: max(1, len(t) // 2) for t in terms if t}
     candidates: set[Path] = set()
     root = _content_root()
-    for term in terms[:8]:
+    for term in terms[:12]:
         try:
             proc = subprocess.run(
                 ["rg", "-F", "-l", "--glob", "*.md", term, str(root)],
@@ -94,13 +161,23 @@ def _keyword_hits(query: str, limit: int) -> list[dict[str, Any]]:
         for term, weight in term_weight.items():
             if term in low or term in path.stem.lower():
                 score += weight
+        ql = query.lower()
+        if "mcp" in ql and ("fastmcp" in low or "mcp::" in low or " brain-mcp" in low):
+            score += 22.0
+        if ("cursor" in ql or "兜底" in query) and ("_cursor_queue" in low or "cursor_queue" in low):
+            score += 28.0
+        if ("写作" in query or "banned" in ql) and ("config" in low or "yaml" in low):
+            score += 12.0
+        score = _intent_path_bonus(query, path, score)
         if score <= 0:
             continue
+        preview_terms = [t for t in term_weight if t in low or t in path.stem.lower()]
+        preview = _preview_snippet(text, preview_terms or terms, query)
         rows.append(
             {
                 "path": str(path),
                 "title": path.stem,
-                "preview": text.strip().replace("\r", " ").replace("\n", " ")[:220],
+                "preview": preview,
                 "score": float(-score),
                 "method": "fulltext",
                 "_term_hits": score,

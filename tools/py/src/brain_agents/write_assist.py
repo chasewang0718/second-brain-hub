@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 import yaml
+from ollama import Client
 
 from brain_agents.ask import ask
-from brain_core.config import load_paths_config
 
 
 def _repo_root() -> Path:
@@ -33,7 +34,71 @@ def _clean_phrase(text: str, banned: list[str]) -> str:
     return out
 
 
-def write_draft(topic: str, platform: str, reader: str, source_limit: int = 5) -> dict[str, Any]:
+def _ollama_client() -> Client:
+    host = os.getenv("OLLAMA_HOST", "").strip()
+    return Client(host=host) if host else Client()
+
+
+def _apply_constraints(draft: str, max_paragraphs: int, max_chars: int, banned: list[str]) -> str:
+    draft = _clean_phrase(draft, banned)
+    parts = [p.strip() for p in draft.split("\n\n") if p.strip()]
+    if len(parts) > max_paragraphs:
+        parts = parts[:max_paragraphs]
+    out = "\n\n".join(parts)
+    return out[:max_chars]
+
+
+def _llm_generate(
+    topic: str,
+    platform: str,
+    reader: str,
+    sources: list[dict[str, Any]],
+    cfg: dict[str, Any],
+    style: dict[str, Any],
+    max_paragraphs: int,
+    max_chars: int,
+    banned: list[str],
+    extra_instruction: str = "",
+) -> str:
+    model = os.getenv("BRAIN_WRITE_MODEL", "qwen2.5:3b").strip()
+    bullets: list[str] = []
+    for row in sources[: min(5, len(sources))]:
+        prev = str(row.get("preview", ""))[:280]
+        bullets.append(f"- {row.get('title', '')}: {prev}")
+    block = "\n".join(bullets) if bullets else "(no retrieval hits)"
+    opening = style.get("opening", "")
+    cta = style.get("cta", "")
+    extra = f"\nAdditional constraint:\n{extra_instruction}\n" if extra_instruction.strip() else ""
+    prompt = (
+        f"You are a writing assistant. Output ONLY the draft body (no markdown title line, no preamble).\n"
+        f"Platform: {platform}\nReader: {reader}\nTopic: {topic}\n"
+        f"Tone: {cfg.get('tone_default', 'clear')}\n"
+        f"Style hints — opening: {opening}; closing: {cta}\n"
+        f"Hard limits: at most {max_paragraphs} paragraphs (blank line separated), "
+        f"at most {max_chars} characters total.\n"
+        f"Use the same primary language as the topic (e.g. Chinese if the topic is Chinese).\n"
+        f"Never use these phrases (even partially): {', '.join(repr(b) for b in banned if b)}.\n"
+        f"{extra}"
+        f"\nReference snippets from the user's notes:\n{block}\n"
+    )
+    client = _ollama_client()
+    out = client.generate(model=model, prompt=prompt)
+    if hasattr(out, "response"):
+        raw = getattr(out, "response") or ""
+    elif isinstance(out, dict):
+        raw = str(out.get("response", ""))
+    else:
+        raw = str(out)
+    return raw.strip()
+
+
+def write_draft(
+    topic: str,
+    platform: str,
+    reader: str,
+    source_limit: int = 5,
+    engine: str = "template",
+) -> dict[str, Any]:
     cfg = _constraints().get("writing", {})
     style = cfg.get("platform_style", {}).get(platform, cfg.get("platform_style", {}).get("default", {}))
     opening = style.get("opening", "state the core idea in one sentence")
@@ -44,32 +109,82 @@ def write_draft(topic: str, platform: str, reader: str, source_limit: int = 5) -
     tone = cfg.get("tone_default", "clear, practical, concrete")
 
     retrieval_query = f"{topic} {reader} {platform}"
-    sources = ask(retrieval_query, limit=source_limit)
+    sources = ask(retrieval_query, limit=source_limit, mode="auto")
 
-    lead = f"{topic} matters to {reader} because it directly affects real decisions."
-    body_points = [
-        f"One practical approach: {opening}.",
-        "Use one small experiment first, measure result, then scale.",
-        "Keep the language plain and avoid abstract jargon.",
-    ]
-    if sources:
-        body_points.append(f"Reference prior notes from {Path(sources[0]['path']).name} to keep consistency.")
-    body_points.append(f"Final move: {cta}.")
+    engine_l = engine.lower().strip()
+    if engine_l not in {"template", "llm"}:
+        engine_l = "template"
 
-    paragraphs = [lead] + body_points[: max(0, max_paragraphs - 1)]
-    draft = "\n\n".join(paragraphs)
-    draft = _clean_phrase(draft, banned)[:max_chars]
+    draft = ""
+    engine_used = engine_l
+    fallback_reason = ""
+    if engine_l == "llm":
+        try:
+            draft = _llm_generate(
+                topic=topic,
+                platform=platform,
+                reader=reader,
+                sources=sources,
+                cfg=cfg,
+                style=style,
+                max_paragraphs=max_paragraphs,
+                max_chars=max_chars,
+                banned=banned,
+            )
+            if not draft.strip():
+                raise ValueError("empty_llm_response")
+            draft = _apply_constraints(draft, max_paragraphs, max_chars, banned)
+            if any(b.lower() in draft.lower() for b in banned if b):
+                draft = _llm_generate(
+                    topic=topic,
+                    platform=platform,
+                    reader=reader,
+                    sources=sources,
+                    cfg=cfg,
+                    style=style,
+                    max_paragraphs=max_paragraphs,
+                    max_chars=max_chars,
+                    banned=banned,
+                    extra_instruction=(
+                        "Rewrite completely: the previous version still contained a banned phrase. "
+                        "Avoid clichés and the forbidden phrases listed above."
+                    ),
+                )
+                draft = _apply_constraints(draft, max_paragraphs, max_chars, banned)
+        except Exception as exc:
+            engine_used = "template"
+            fallback_reason = type(exc).__name__
+            draft = ""
+
+    if not draft:
+        lead = f"{topic} matters to {reader} because it directly affects real decisions."
+        body_points = [
+            f"One practical approach: {opening}.",
+            "Use one small experiment first, measure result, then scale.",
+            "Keep the language plain and avoid abstract jargon.",
+        ]
+        if sources:
+            body_points.append(f"Reference prior notes from {Path(sources[0]['path']).name} to keep consistency.")
+        body_points.append(f"Final move: {cta}.")
+
+        paragraphs = [lead] + body_points[: max(0, max_paragraphs - 1)]
+        draft = "\n\n".join(paragraphs)
+        draft = _apply_constraints(draft, max_paragraphs, max_chars, banned)
 
     provenance = [
         {"path": row.get("path", ""), "title": row.get("title", ""), "method": row.get("method", "")}
         for row in sources
     ]
-    return {
+    out: dict[str, Any] = {
         "topic": topic,
         "platform": platform,
         "reader": reader,
         "tone": tone,
+        "engine": engine_used,
         "draft": draft,
         "provenance": provenance,
     }
+    if engine_l == "llm" and fallback_reason:
+        out["engine_fallback"] = fallback_reason
+    return out
 

@@ -253,10 +253,21 @@ def write_cmd(
     platform: str = typer.Option("default", help="Target platform, e.g. xiaohongshu/linkedin"),
     reader: str = typer.Option("general reader", help="Target reader persona"),
     source_limit: int = typer.Option(5, "--source-limit", "--limit", min=1, max=20),
+    engine: str = typer.Option(
+        "template",
+        "--engine",
+        help="template (default) or llm (Ollama; BRAIN_WRITE_MODEL, OLLAMA_HOST)",
+    ),
 ) -> None:
     from brain_agents.write_assist import write_draft
 
-    result = write_draft(topic=topic, platform=platform, reader=reader, source_limit=source_limit)
+    result = write_draft(
+        topic=topic,
+        platform=platform,
+        reader=reader,
+        source_limit=source_limit,
+        engine=engine,
+    )
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
