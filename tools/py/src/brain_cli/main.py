@@ -295,6 +295,60 @@ def image_inbox_ingest_cmd(
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+@app.command("graph-build")
+def graph_build_cmd() -> None:
+    from brain_agents.graph_build import build_graph
+
+    try:
+        stats = build_graph()
+    except RuntimeError as exc:
+        typer.echo(json.dumps({"status": "skipped", "reason": str(exc)}, ensure_ascii=False))
+        raise typer.Exit(1)
+    typer.echo(json.dumps({"status": "ok", **stats}, ensure_ascii=False, indent=2, default=str))
+
+
+@app.command("graph-fof")
+def graph_fof_cmd(
+    person_id: str = typer.Argument(..., help="Anchor person_id"),
+    limit: int = typer.Option(10, min=1, max=200),
+) -> None:
+    from brain_agents.graph_query import fof
+
+    try:
+        out = fof(person_id, limit=limit)
+    except RuntimeError as exc:
+        typer.echo(json.dumps({"status": "skipped", "reason": str(exc)}, ensure_ascii=False))
+        raise typer.Exit(1)
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
+@app.command("graph-shared-identifier")
+def graph_shared_identifier_cmd(
+    person_id: str = typer.Argument(..., help="Anchor person_id"),
+    limit: int = typer.Option(20, min=1, max=200),
+) -> None:
+    from brain_agents.graph_query import shared_identifier
+
+    try:
+        out = shared_identifier(person_id, limit=limit)
+    except RuntimeError as exc:
+        typer.echo(json.dumps({"status": "skipped", "reason": str(exc)}, ensure_ascii=False))
+        raise typer.Exit(1)
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
+@app.command("graph-stats")
+def graph_stats_cmd() -> None:
+    from brain_agents.graph_query import stats as graph_stats
+
+    try:
+        out = graph_stats()
+    except RuntimeError as exc:
+        typer.echo(json.dumps({"status": "skipped", "reason": str(exc)}, ensure_ascii=False))
+        raise typer.Exit(1)
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
 @app.command("audio-inbox-ingest")
 def audio_inbox_ingest_cmd(
     limit: int = typer.Option(1, min=1, max=100, help="How many audio files to process"),
