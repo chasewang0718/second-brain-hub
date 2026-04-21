@@ -698,6 +698,30 @@ def ingest_backup_now_cmd(
     typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
 
 
+@app.command("asset-dedup")
+def asset_dedup_cmd(
+    assets_root: str = typer.Option("", "--assets-root", help="Override paths.assets_root"),
+    min_kb: int = typer.Option(10, "--min-kb", min=0, help="Skip files smaller than this"),
+    include_inbox: bool = typer.Option(False, "--include-inbox", help="Do NOT skip 99-inbox/ (default skips it)"),
+    no_write: bool = typer.Option(False, "--no-write", help="Skip writing the MD/TSV reports"),
+) -> None:
+    """B1 · Two-pass SHA256 dedup scanner (Python port of
+    tools/asset/brain-asset-dedup.ps1). Read-only; writes reports
+    to ``<assets_root>/_migration/dedup-YYYY-MM-DD.{md,tsv}``.
+    """
+    from pathlib import Path as _P
+
+    from brain_agents.asset_dedup import run
+
+    out = run(
+        assets_root=_P(assets_root) if assets_root.strip() else None,
+        min_kb=min_kb,
+        include_inbox=include_inbox,
+        write_reports=not no_write,
+    )
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
 @app.command("asset-stats")
 def asset_stats_cmd(
     assets_root: str = typer.Option("", "--assets-root", help="Override paths.assets_root"),
