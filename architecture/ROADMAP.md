@@ -491,6 +491,7 @@ Monica/Dex 式人际关系助手.
 | 2026-04-21 | — | **identifiers-repair**: `--kinds phone|email|wxid|all`；email+gmail_addr、wxid 存量大小写归一（T3 冲突语义与 phone 一致）。 |
 | 2026-04-21 | — | **Cloud flush / D3**: MCP `cloud_flush_preview` + `identifiers_repair_preview`；pytest `test_cloud_flush.py`；`parse_identifiers_repair_kinds` 供 CLI/MCP 共用。 |
 | 2026-04-21 | — | **Dry-run ingest**: `tools/py/scripts/verify_ingest_dry_run.py`（可选 `VERIFY_WECHAT_DECODER`）；MCP `cloud_queue_list_tool`、`ios_backup_locate_preview`、`wechat_sync_preview`。 |
+| 2026-04-21 | — | **A3 图像分支**: `brain_agents/image_inbox.py` + `brain image-inbox-ingest [--path ...] [--no-copy]`；paddleocr 懒加载且可选（未安装时写 `ocr_status: pending` 指针卡 + `_cursor_queue/` 兜底任务）；`config/paths.yaml` 新增 `image_inbox_dir`；6 个 pytest 用例（全量 36 个）。 |
 
 ---
 

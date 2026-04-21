@@ -61,3 +61,4 @@
 | 2026-04-21 | 首版（E 文档化闭环） |
 | 2026-04-21 | 本轮 agent：B/C 回归数据、D1/D3 初样报告链入；E 全开仍待 A2b + D 扩样 |
 | 2026-04-21 | Caps+D 统一入口：AHK + PowerShell `gsave` 增加「文件拖放列表」分支 → 选中 PDF 时自动走 `brain pdf-inbox-ingest --path ...`（见 journal `§ caps-d-file-branch`）；新增 `ingest_pdf_paths` + `--path/-p` CLI 参数。文本分支完全不变。 |
+| 2026-04-21 | A3 图像分支落地：`brain_agents/image_inbox.py` + `brain image-inbox-ingest`（paddleocr 懒加载，缺库时写 `ocr_status: pending` 指针卡 + `_cursor_queue/` 兜底）；新增 `config/paths.yaml:image_inbox_dir` 与 6 个 pytest 用例（全量 36）。后续 Caps+D 图像分支只需在 `gsave` 的 `CF_HDROP` 路径判断里追加 `.png/.jpg/...` → 调用同一 CLI。 |

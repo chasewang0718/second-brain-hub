@@ -16,6 +16,8 @@ paths:
 
   # PDF pipeline 关键路径
   pdf_inbox_dir: "D:\\second-brain-assets\\99-inbox"
+  # A3 图像分支 (paddleocr 可选; 未安装时写入 OCR pending 指针卡)
+  image_inbox_dir: "D:\\second-brain-assets\\99-inbox-image"
   ollama_output_dir: "D:\\second-brain-assets\\_migration\\ollama-output"
 
   # Escalation 相关
