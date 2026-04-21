@@ -37,12 +37,21 @@ def test_context_for_meeting_markdown_renders() -> None:
     assert "Recent interactions" in out
 
 
-def test_identifiers_repair_dry_run() -> None:
+def test_identifiers_repair_dry_run_default_phone() -> None:
     code, out = _run(["identifiers-repair", "--dry-run"])
     assert code == 0
     data = json.loads(out)
     assert data.get("status") == "dry_run"
-    assert "rows_scanned" in data
+    assert "results" in data and "phone" in data["results"]
+    assert "rows_scanned" in data["results"]["phone"]
+    assert "totals" in data
+
+
+def test_identifiers_repair_all_kinds_dry_run() -> None:
+    code, out = _run(["identifiers-repair", "--dry-run", "--kinds", "all"])
+    assert code == 0
+    data = json.loads(out)
+    assert set(data["results"].keys()) >= {"phone", "email", "wxid"}
 
 
 def test_merge_candidates_list_returns_json_array() -> None:

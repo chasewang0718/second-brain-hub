@@ -46,20 +46,36 @@ def normalize_value(kind: str, value: str) -> str:
     return raw.lower()
 
 
-def repair_phone_identifiers(*, dry_run: bool = False) -> dict[str, Any]:
+def _repair_identifier_kind_group(
+    kinds_lower: tuple[str, ...],
+    *,
+    dry_run: bool,
+    reason_prefix: str,
+) -> dict[str, Any]:
     """
-    Rewrite stored phone value_normalized rows to the current normalize_phone_digits rules.
+    Rewrite person_identifiers rows whose lower(kind) is in kinds_lower.
 
-    - Same-person duplicate after canonicalization: drop redundant row.
-    - Another person already owns the canonical digits: enqueue merge_candidates (T3); skip update.
+    Collision / duplicate semantics match repair_phone_identifiers (T3 on cross-person conflict).
     """
+    if not kinds_lower:
+        return {
+            "rows_scanned": 0,
+            "skipped_unchanged": 0,
+            "updated": 0,
+            "deleted_duplicate": 0,
+            "merge_candidates": 0,
+            "dry_run": dry_run,
+            "status": "dry_run" if dry_run else "ok",
+        }
+    ph = ",".join(["?"] * len(kinds_lower))
     rows = query(
-        """
+        f"""
         SELECT id, person_id, kind, value_normalized, value_original
         FROM person_identifiers
-        WHERE lower(kind) = 'phone'
+        WHERE lower(kind) IN ({ph})
         ORDER BY id
-        """
+        """,
+        list(kinds_lower),
     )
     stats: dict[str, Any] = {
         "rows_scanned": 0,
@@ -73,10 +89,11 @@ def repair_phone_identifiers(*, dry_run: bool = False) -> dict[str, Any]:
         stats["rows_scanned"] += 1
         oid = int(r["id"])
         pid = str(r["person_id"])
+        kind_k = str(r["kind"]).lower()
         old_norm = str(r["value_normalized"] or "")
         original = r["value_original"]
         seed = str(original).strip() if original else old_norm
-        new_norm = normalize_value("phone", seed)
+        new_norm = normalize_value(kind_k, seed)
         if new_norm == old_norm:
             stats["skipped_unchanged"] += 1
             continue
@@ -84,9 +101,9 @@ def repair_phone_identifiers(*, dry_run: bool = False) -> dict[str, Any]:
         dup_same = query(
             """
             SELECT id FROM person_identifiers
-            WHERE person_id = ? AND lower(kind) = 'phone' AND value_normalized = ? AND id <> ?
+            WHERE person_id = ? AND lower(kind) = ? AND value_normalized = ? AND id <> ?
             """,
-            [pid, new_norm, oid],
+            [pid, kind_k, new_norm, oid],
         )
         if dup_same:
             if not dry_run:
@@ -97,9 +114,9 @@ def repair_phone_identifiers(*, dry_run: bool = False) -> dict[str, Any]:
         others = query(
             """
             SELECT DISTINCT person_id FROM person_identifiers
-            WHERE lower(kind) = 'phone' AND value_normalized = ? AND person_id <> ?
+            WHERE lower(kind) = ? AND value_normalized = ? AND person_id <> ?
             """,
-            [new_norm, pid],
+            [kind_k, new_norm, pid],
         )
         opids = [str(x["person_id"]) for x in others]
         if len(opids) > 1:
@@ -107,8 +124,14 @@ def repair_phone_identifiers(*, dry_run: bool = False) -> dict[str, Any]:
                 pid,
                 opids[0],
                 0.45,
-                "phone_repair_ambiguous",
-                {"new_norm": new_norm, "old_normalized": old_norm, "row_id": oid, "owners": opids},
+                f"{reason_prefix}_repair_ambiguous",
+                {
+                    "kind": kind_k,
+                    "new_norm": new_norm,
+                    "old_normalized": old_norm,
+                    "row_id": oid,
+                    "owners": opids,
+                },
             )
             stats["merge_candidates"] += 1
             continue
@@ -117,8 +140,8 @@ def repair_phone_identifiers(*, dry_run: bool = False) -> dict[str, Any]:
                 pid,
                 opids[0],
                 0.6,
-                "phone_repair_collision",
-                {"new_norm": new_norm, "old_normalized": old_norm, "row_id": oid},
+                f"{reason_prefix}_repair_collision",
+                {"kind": kind_k, "new_norm": new_norm, "old_normalized": old_norm, "row_id": oid},
             )
             stats["merge_candidates"] += 1
             continue
@@ -132,6 +155,53 @@ def repair_phone_identifiers(*, dry_run: bool = False) -> dict[str, Any]:
 
     stats["status"] = "dry_run" if dry_run else "ok"
     return stats
+
+
+def repair_phone_identifiers(*, dry_run: bool = False) -> dict[str, Any]:
+    """Rewrite phone rows (compat wrapper)."""
+    return _repair_identifier_kind_group(("phone",), dry_run=dry_run, reason_prefix="phone")
+
+
+def repair_email_identifiers(*, dry_run: bool = False) -> dict[str, Any]:
+    """Rewrite email + gmail_addr rows to lowercase canonical form."""
+    return _repair_identifier_kind_group(("email", "gmail_addr"), dry_run=dry_run, reason_prefix="email")
+
+
+def repair_wxid_identifiers(*, dry_run: bool = False) -> dict[str, Any]:
+    """Rewrite wxid rows to lowercase canonical form."""
+    return _repair_identifier_kind_group(("wxid",), dry_run=dry_run, reason_prefix="wxid")
+
+
+def run_identifiers_repair(*, kinds: set[str], dry_run: bool = False) -> dict[str, Any]:
+    """
+    Run repair for requested kind groups: phone, email (includes gmail_addr), wxid.
+
+    Returns per-group stats under ``results`` plus optional ``totals``.
+    """
+    allowed = {"phone", "email", "wxid"}
+    unknown = kinds - allowed
+    if unknown:
+        return {"status": "error", "reason": "unknown_kinds", "unknown": sorted(unknown)}
+    out: dict[str, Any] = {"dry_run": dry_run, "kinds_requested": sorted(kinds), "results": {}}
+    totals = {"rows_scanned": 0, "skipped_unchanged": 0, "updated": 0, "deleted_duplicate": 0, "merge_candidates": 0}
+    if "phone" in kinds:
+        st = repair_phone_identifiers(dry_run=dry_run)
+        out["results"]["phone"] = st
+        for k in totals:
+            totals[k] += int(st.get(k, 0))
+    if "email" in kinds:
+        st = repair_email_identifiers(dry_run=dry_run)
+        out["results"]["email"] = st
+        for k in totals:
+            totals[k] += int(st.get(k, 0))
+    if "wxid" in kinds:
+        st = repair_wxid_identifiers(dry_run=dry_run)
+        out["results"]["wxid"] = st
+        for k in totals:
+            totals[k] += int(st.get(k, 0))
+    out["totals"] = totals
+    out["status"] = "dry_run" if dry_run else "ok"
+    return out
 
 
 def list_persons_for_identifier(kind: str, value: str) -> list[str]:
