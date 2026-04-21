@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
 from brain_core.config import load_paths_config
-from brain_memory.vectors import search as vector_search
 
 ALIASES: dict[str, list[str]] = {
     "荷兰": ["netherlands", "dutch", "nl"],
@@ -50,8 +50,30 @@ def _keyword_hits(query: str, limit: int) -> list[dict[str, Any]]:
     if not terms:
         return []
     term_weight = {t: max(1, len(t) // 2) for t in terms if t}
+    candidates: set[Path] = set()
+    root = _content_root()
+    for term in terms[:8]:
+        try:
+            proc = subprocess.run(
+                ["rg", "-F", "-l", "--glob", "*.md", term, str(root)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except Exception:
+            proc = None
+        if proc and proc.returncode in (0, 1):
+            for line in proc.stdout.splitlines():
+                line = line.strip()
+                if line:
+                    candidates.add(Path(line))
+
+    # Fallback when rg is unavailable or returns nothing.
+    if not candidates:
+        candidates = set(root.rglob("*.md"))
+
     rows: list[dict[str, Any]] = []
-    for path in sorted(_content_root().rglob("*.md")):
+    for path in sorted(candidates):
         text = path.read_text(encoding="utf-8", errors="ignore").lstrip("\ufeff")
         low = text.lower()
         score = 0.0
@@ -78,8 +100,21 @@ def ask(query: str, limit: int = 5) -> list[dict[str, Any]]:
     query = query.strip()
     if not query:
         return []
-    vec = vector_search(query=query, limit=max(limit, 8))
     txt = _keyword_hits(query=query, limit=max(limit, 8))
+
+    # Fast path: when keyword hits are strong enough, skip heavy vector import.
+    if len(txt) >= limit and sum(float(item.get("_term_hits", 0.0)) for item in txt[:limit]) >= limit * 2:
+        out: list[dict[str, Any]] = []
+        for row in txt[:limit]:
+            item = dict(row)
+            item["method"] = "hybrid"
+            item.pop("_term_hits", None)
+            out.append(item)
+        return out
+
+    from brain_memory.vectors import search as vector_search
+
+    vec = vector_search(query=query, limit=max(limit, 8))
     merged: dict[str, dict[str, Any]] = {}
     for row in txt + vec:
         key = row["path"]

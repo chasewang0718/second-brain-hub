@@ -154,7 +154,7 @@ def ask_cmd(
     query_file: str = typer.Option("", help="Read UTF-8 query text from file"),
     limit: int = typer.Option(5, min=1, max=20),
 ) -> None:
-    from brain_memory.memory import Memory
+    from brain_agents.ask import ask as ask_engine
 
     final_query = query
     if query_file:
@@ -164,7 +164,7 @@ def ask_cmd(
     final_query = final_query.strip()
     if not final_query:
         raise typer.BadParameter("query is required (arg, --query-file, or stdin)")
-    typer.echo(json.dumps(Memory().ask(query=final_query, limit=limit), ensure_ascii=False, indent=2))
+    typer.echo(json.dumps(ask_engine(query=final_query, limit=limit), ensure_ascii=False, indent=2))
 
 
 @app.command("watch")
