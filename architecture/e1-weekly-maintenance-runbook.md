@@ -16,6 +16,7 @@ authoritative_at: C:\dev-projects\second-brain-hub\architecture\e1-weekly-mainte
 | 1 | `brain identifiers-repair --kinds all` | 存量 `person_identifiers.value_normalized` 大小写 / 号段重写；冲突写入 T3 `merge_candidates` | DuckDB `merge_candidates.status = pending` 条数可能增加 |
 | 2 | `brain cloud flush --dry-run` | 快照当前 `_cursor_queue/` 待办条目数；不触发真正 flush | 日志里一行 count + 条目清单 |
 | 3 | `brain graph-build`（可 `-SkipGraph` 跳过） | 从 DuckDB 重建 Kuzu 只读视图（F3 POC） | `<telemetry_logs_dir>/kuzu-graph/brain.kuzu` 被覆盖 |
+| 4 | `brain merge-candidates sync-from-graph --dry-run`（同 `-SkipGraph` 旁路） | 扫 Kuzu 的 shared-identifier 对，报告未被 `merge_candidates` / `merge_log` 覆盖的条数（只报数，不写） | 日志里一行 `proposed = N` |
 
 **不包含的动作**（见下文"为什么不做")
 
@@ -91,3 +92,4 @@ Get-ScheduledTask -TaskName BrainWeeklyMaintenance | Format-List TaskName, State
 | 日期 | 说明 |
 |---|---|
 | 2026-04-21 | 首版；`brain-weekly-maintenance.ps1` + 注册脚本；每周日 23:00；三步（repair / cloud dry-run / graph-build），含 `-SkipGraph` 旁路。 |
+| 2026-04-21 | 加 "merge-candidates sync-from-graph --dry-run" 为第 4 步（随 `-SkipGraph` 一起旁路）；真正写入需人工 `brain merge-candidates sync-from-graph --apply`。 |

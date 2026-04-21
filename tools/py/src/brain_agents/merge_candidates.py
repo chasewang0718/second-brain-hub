@@ -1,12 +1,31 @@
-"""T3 merge queue: list / accept / reject manual identity merge candidates."""
+"""T3 merge queue: list / accept / reject manual identity merge candidates.
+
+Also provides :func:`sync_from_graph` which pulls cross-person
+``shared_identifier`` pairs out of the F3 Kuzu view and enqueues any
+that DuckDB has not already captured (via merge_candidates or
+merge_log). This is the "graph → queue" belt-and-suspenders against
+identifiers that slipped past the ingest-time auto-merge.
+"""
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from brain_memory.structured import execute, fetch_one, query
 
 from brain_agents.identity_resolver import merge_persons
+
+
+_GRAPH_KIND_SCORES = {
+    "phone": 0.95,
+    "email": 0.92,
+    "gmail_addr": 0.92,
+    "wxid": 0.93,
+    "wa_jid": 0.93,
+    "ios_contact_row": 0.8,
+}
+_GRAPH_DEFAULT_SCORE = 0.6
 
 
 def list_candidates(*, status: str | None = "pending", limit: int = 50) -> list[dict[str, Any]]:
@@ -87,3 +106,116 @@ def accept_candidate(candidate_id: int, *, kept_person_id: str | None = None) ->
         [candidate_id],
     )
     return {"status": "merged", "kept": kept, "absorbed": absorbed, "merge_candidate_id": candidate_id}
+
+
+def _enumerate_shared_identifier_pairs() -> list[dict[str, Any]]:
+    """Query the built Kuzu graph for cross-person shared-identifier pairs.
+
+    Raises ``RuntimeError`` with ``"kuzu_missing:..."`` or
+    ``"kuzu_not_built:..."`` when the view cannot be opened; callers
+    should catch and convert into a ``{"status":"skipped"}`` result.
+
+    Returns rows shaped ``{"person_a", "person_b", "kind", "value"}``
+    with ``person_a < person_b`` guaranteed.
+    """
+    from brain_agents.graph_query import _open, _result_rows
+
+    conn = _open()
+    res = conn.execute(
+        "MATCH (a:Person)-[:HasIdentifier]->(i:Identifier)<-[:HasIdentifier]-(b:Person) "
+        "WHERE a.person_id < b.person_id "
+        "RETURN a.person_id AS person_a, b.person_id AS person_b, "
+        "       i.kind AS kind, i.value_normalized AS value"
+    )
+    return _result_rows(res)
+
+
+def _already_handled_pairs() -> set[tuple[str, str]]:
+    """Pairs that should NOT be re-queued: already merged OR already
+    in ``merge_candidates`` (any status). Returned as canonical
+    (lesser, greater) tuples.
+    """
+    handled: set[tuple[str, str]] = set()
+    for r in query(
+        "SELECT kept_person_id AS a, absorbed_person_id AS b FROM merge_log"
+    ):
+        a, b = str(r["a"]), str(r["b"])
+        if a and b:
+            handled.add(tuple(sorted([a, b])))  # type: ignore[arg-type]
+    for r in query(
+        "SELECT person_a AS a, person_b AS b FROM merge_candidates"
+    ):
+        a, b = str(r["a"]), str(r["b"])
+        if a and b:
+            handled.add(tuple(sorted([a, b])))  # type: ignore[arg-type]
+    return handled
+
+
+def sync_from_graph(*, dry_run: bool = False, max_inserts: int = 500) -> dict[str, Any]:
+    """Pull fresh shared-identifier pairs from Kuzu and enqueue those
+    DuckDB hasn't seen yet.
+
+    Returns a summary dict with ``proposed`` (always populated) and
+    ``inserted`` (0 in dry-run). Graceful ``{"status":"skipped", ...}``
+    when Kuzu is not installed or the graph has not been built.
+    """
+    try:
+        rows = _enumerate_shared_identifier_pairs()
+    except RuntimeError as exc:
+        return {"status": "skipped", "reason": str(exc), "dry_run": bool(dry_run)}
+    except Exception as exc:  # pragma: no cover - defensive
+        return {"status": "skipped", "reason": f"runtime:{exc.__class__.__name__}", "dry_run": bool(dry_run)}
+
+    handled = _already_handled_pairs()
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for r in rows:
+        a = str(r.get("person_a") or "")
+        b = str(r.get("person_b") or "")
+        if not a or not b:
+            continue
+        pair = tuple(sorted([a, b]))
+        if pair in handled:
+            continue
+        grouped.setdefault(pair, []).append({"kind": str(r.get("kind") or ""), "value": str(r.get("value") or "")})
+
+    proposed: list[dict[str, Any]] = []
+    for (a, b), evidence in grouped.items():
+        kinds = sorted({e["kind"] for e in evidence if e["kind"]})
+        score = max(
+            (_GRAPH_KIND_SCORES.get(k, _GRAPH_DEFAULT_SCORE) for k in kinds),
+            default=_GRAPH_DEFAULT_SCORE,
+        )
+        proposed.append(
+            {
+                "person_a": a,
+                "person_b": b,
+                "score": score,
+                "reason": "graph:shared_identifier:" + ",".join(kinds) if kinds else "graph:shared_identifier",
+                "detail": {"identifiers": evidence, "source": "kuzu"},
+            }
+        )
+
+    proposed.sort(key=lambda r: (-r["score"], r["person_a"], r["person_b"]))
+    inserted = 0
+    if not dry_run:
+        for cand in proposed[: max(0, int(max_inserts))]:
+            execute(
+                "INSERT INTO merge_candidates (person_a, person_b, score, reason, status, detail_json) "
+                "VALUES (?, ?, ?, ?, 'pending', ?)",
+                [
+                    cand["person_a"],
+                    cand["person_b"],
+                    float(cand["score"]),
+                    cand["reason"],
+                    json.dumps(cand["detail"], ensure_ascii=False),
+                ],
+            )
+            inserted += 1
+
+    return {
+        "status": "ok",
+        "proposed": len(proposed),
+        "inserted": inserted,
+        "dry_run": bool(dry_run),
+        "samples": proposed[:5],
+    }

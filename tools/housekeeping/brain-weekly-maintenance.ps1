@@ -64,6 +64,11 @@ $results += Invoke-BrainStep -Name 'identifiers-repair' -Args @('identifiers-rep
 $results += Invoke-BrainStep -Name 'cloud-flush-dry-run' -Args @('cloud','flush','--dry-run')
 if (-not $SkipGraph) {
     $results += Invoke-BrainStep -Name 'graph-build' -Args @('graph-build')
+    # Graph → T3 merge queue sync. Default stays dry-run: we surface
+    # the count in the log, require human review before actually
+    # inserting pending candidates.
+    $results += Invoke-BrainStep -Name 'merge-candidates-sync-graph-dryrun' `
+        -Args @('merge-candidates','sync-from-graph','--dry-run')
 }
 
 $failed = @($results | Where-Object { $_.ExitCode -ne 0 })

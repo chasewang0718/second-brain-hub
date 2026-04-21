@@ -15,6 +15,7 @@ def test_mcp_server_import_and_fastmcp_instance() -> None:
     assert callable(getattr(server, "wechat_sync_preview", None))
     assert callable(getattr(server, "graph_fof_tool", None))
     assert callable(getattr(server, "graph_shared_identifier_tool", None))
+    assert callable(getattr(server, "merge_candidates_sync_from_graph_tool", None))
 
 
 def test_graph_tools_skip_gracefully_without_graph_build(tmp_path, monkeypatch) -> None:

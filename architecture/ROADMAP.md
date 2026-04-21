@@ -400,7 +400,7 @@ Monica/Dex 式人际关系助手.
 | 能力 | CLI / 入口 |
 |---|---|
 | 查询联系人 / 逾期 / 会前上下文 | `brain who`, `brain overdue`（可选 `--channel wechat` 等）, `brain context-for-meeting`（`--since-days`、`--format md`） |
-| 同上（MCP） | `who_tool`, `overdue_tool`, `context_for_meeting_tool`, `merge_candidates_*`, `cloud_flush_preview`, `identifiers_repair_preview`, `cloud_queue_list_tool`, `ios_backup_locate_preview`, `wechat_sync_preview`, `graph_fof_tool`, `graph_shared_identifier_tool`（`brain_mcp/server.py`） |
+| 同上（MCP） | `who_tool`, `overdue_tool`, `context_for_meeting_tool`, `merge_candidates_*`, `merge_candidates_sync_from_graph_tool`, `cloud_flush_preview`, `identifiers_repair_preview`, `cloud_queue_list_tool`, `ios_backup_locate_preview`, `wechat_sync_preview`, `graph_fof_tool`, `graph_shared_identifier_tool`（`brain_mcp/server.py`） |
 | T3 合并候选（手动审） | `brain merge-candidates list`, `accept <id> [--keep PID]`, `reject <id>` |
 | 微信 decoder 导入 | `brain wechat-sync [--dry-run]` |
 | iPhone 备份定位 / 通讯录 / WhatsApp | `brain backup-ios-locate`, `brain contacts-ingest-ios`, `brain whatsapp-ingest-ios`（参见 `architecture/ios-backup-runbook.md`）；与本机备份 quick check：`tools/py/scripts/verify_ingest_dry_run.py` |
@@ -500,6 +500,7 @@ Monica/Dex 式人际关系助手.
 | 2026-04-21 | — | **E1 周期维护**: 新增 `tools/housekeeping/brain-weekly-maintenance.ps1` + `register-brain-weekly-maintenance.ps1`（每周日 23:00，跑 `identifiers-repair --kinds all` / `cloud flush --dry-run` / `graph-build`，均只读或幂等；日志写 `_runtime/logs/brain-weekly-maintenance-YYYYMMDD.log`；runbook 见 `architecture/e1-weekly-maintenance-runbook.md`）。 |
 | 2026-04-21 | — | **A3 收尾 · 弃用 PS 脚本**: 删除 12 个 (~105KB) 老 PS 脚本——整个 `tools/ollama-pipeline/`（6 + 配置 md）、`tools/lib/`（config-loader / telemetry / wait-for-batch）、`tools/feedback/harvest-feedback.ps1`、`tools/watchdog/pdf-production-watchdog.ps1`。全部已被 `brain_agents/file_inbox.py` + `image_inbox.py` + `audio_inbox.py` + `cloud_queue.py` 覆盖；保留 `notify.ps1`（通用通知库）。`tools/README.md` 更新子目录说明。 |
 | 2026-04-21 | — | **F3 接入 `context_for_meeting`**: `people.context_for_meeting` 现在同时拉取 Kuzu `shared_identifier` 结果填入 `graph_hints`；Markdown 输出附加 "潜在同一人线索" 表格；缺 Kuzu / 图未构建 → `{"status":"skipped"}` 优雅降级（Markdown 不渲染该节）。MCP 新增 `graph_fof_tool` + `graph_shared_identifier_tool`（也走 skipped 约定）。新增 6 个 pytest 用例（test_context_graph_hints + MCP skip smoke），全量 **63 passed**。 |
+| 2026-04-21 | — | **F3 → T3 队列自动补洞**: `merge_candidates.sync_from_graph` 从 Kuzu 枚举所有跨人 shared-identifier 对，去重 `merge_log` / 已有 `merge_candidates` 后，按 kind 打分（phone/wxid/email ≥ 0.92，其他 0.6）写入 pending；CLI `brain merge-candidates sync-from-graph --dry-run/--apply`；MCP `merge_candidates_sync_from_graph_tool`；E1 周任务第 4 步默认跑 `--dry-run`（日志报 `proposed = N`，写入仍需人工 `--apply`）。新增 6 个 pytest（含 merge_log/merge_candidates 去重 + 正反序规范化 + 未知 kind 默认分数），全量 **69 passed**。 |
 
 ---
 

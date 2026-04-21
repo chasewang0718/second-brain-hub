@@ -492,6 +492,21 @@ def merge_candidates_reject_cmd(candidate_id: int = typer.Argument(..., help="me
     typer.echo(json.dumps(reject_candidate(candidate_id), ensure_ascii=False, indent=2, default=str))
 
 
+@merge_candidates_app.command("sync-from-graph")
+def merge_candidates_sync_from_graph_cmd(
+    dry_run: bool = typer.Option(True, "--dry-run/--apply", help="Preview proposals (default) or insert pending rows"),
+    max_inserts: int = typer.Option(500, min=1, max=5000, help="Safety cap on --apply writes"),
+) -> None:
+    """Scan the Kuzu graph for cross-person shared identifiers and
+    enqueue any pair not yet captured by merge_candidates or merge_log.
+    Skips gracefully if the graph is not built.
+    """
+    from brain_agents.merge_candidates import sync_from_graph
+
+    out = sync_from_graph(dry_run=dry_run, max_inserts=max_inserts)
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
 @app.command("structure-history")
 def structure_history_cmd(dry_run: bool = typer.Option(True, help="Run dry-run only (recommended)")) -> None:
     from brain_agents.structure import structure_history

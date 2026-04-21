@@ -154,6 +154,18 @@ def ios_backup_locate_preview() -> dict:
 
 
 @mcp.tool
+def merge_candidates_sync_from_graph_tool(dry_run: bool = True, max_inserts: int = 500) -> dict:
+    """Enqueue merge_candidates rows for cross-person shared identifiers
+    found in the F3 Kuzu view. Default ``dry_run=True`` returns proposals
+    without writing. Skips gracefully when the graph has not been built.
+    """
+    from brain_agents.merge_candidates import sync_from_graph
+
+    out = sync_from_graph(dry_run=bool(dry_run), max_inserts=max(1, min(int(max_inserts), 5000)))
+    return json.loads(json.dumps(out, ensure_ascii=False, default=str))
+
+
+@mcp.tool
 def graph_fof_tool(person_id: str, limit: int = 10) -> dict:
     """F3 Kuzu read-only: 2-hop friends-of-friends for a person_id.
 
