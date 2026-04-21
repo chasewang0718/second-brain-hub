@@ -6,14 +6,13 @@ import json
 
 from fastmcp import FastMCP
 
+from brain_agents.ask import ask as ask_agent
 from brain_agents.people import context_for_meeting, overdue, who
 from brain_core.config import load_paths_config
 from brain_core.inbox import list_inbox
 from brain_core.safety import list_history as list_git_history
 from brain_core.safety import safety_status as get_safety_status
 from brain_core.telemetry import append_event, list_recent
-from brain_memory.memory import Memory
-
 mcp = FastMCP(name="brain")
 
 
@@ -62,8 +61,9 @@ def history(limit: int = 20, agent: str = "") -> list[dict]:
 
 
 @mcp.tool
-def ask(query: str, limit: int = 5) -> list[dict]:
-    rows = Memory().ask(query=query, limit=limit)
+def ask(query: str, limit: int = 5, mode: str = "auto") -> list[dict]:
+    """mode: fast | auto | deep — same semantics as CLI ``brain ask --mode``."""
+    rows = ask_agent(query=query, limit=limit, mode=mode)
     return json.loads(json.dumps(rows, ensure_ascii=False))
 
 
