@@ -76,7 +76,7 @@ A3 收尾已经删掉了 `tools/ollama-pipeline/`、`tools/lib/`、`tools/feedba
 | B1 | ✅ `brain-asset-stats.ps1` → `brain_agents/asset_stats.py` + CLI `brain asset-stats` (ec3d0e1) | | 2h | 低 |
 | B1 | ✅ `brain-asset-dedup.ps1` → `brain_agents/asset_dedup.py` + CLI `brain asset-dedup` (95cdac4) | | 2h | 低 |
 | B2 | ✅ `brain-asset-overview-cards.ps1` **已删除**（不迁移） | | 10m | 低 |
-| B3 | `brain-asset-migrate.ps1` | `brain_agents/asset_migrate.py`（三模式）+ CLI `brain asset-migrate` | 1d | 中 |
+| B3 | ✅ `brain-asset-migrate.ps1` → `brain_agents/asset_migrate.py` + CLI `brain asset-scan` + `brain asset-migrate-execute` | | 1d | 中 |
 | B4 | `brain-asset-source-cleanup.ps1` | `brain_agents/asset_source_cleanup.py` + CLI | 4h | 中（删源） |
 | B5 | 清理 `.reference` profile 的 `gasset-*` 函数，改调 Python CLI | 修 `Microsoft.PowerShell_profile.ps1.reference` | 30m | 低 |
 | B6 | 删除 `tools/asset/*.ps1` + 本计划 | 彻底收尾 | 10m | 低 |
@@ -85,13 +85,21 @@ A3 收尾已经删掉了 `tools/ollama-pipeline/`、`tools/lib/`、`tools/feedba
 
 ## 中间态约定（迁移期）
 
-在 B3 执行前，PS 的 `brain-asset-migrate.ps1` 还活着；新 Python 版先加进来、
-暴露 `brain asset-migrate --dry-run`，**和 PS 并跑对拍 3 周**。对拍维度：
+B3 后，PS `brain-asset-migrate.ps1` **保留** 继续可用；Python 版通过
+`brain asset-scan` + `brain asset-migrate-execute` 暴露同一流程。**并跑
+对拍 3 周**再做 B6 删除。对拍维度：
 
 - 扫描文件总数一致
 - 每类（photos / video / audio / fonts / archives / inbox / trash）命中数一致
 - 目标路径一致（分月粒度）
-- 只允许差异：Python 新增对 HEIF / WebP / AVIF 等新格式的支持
+- 只允许差异：
+  - Python 默认扫到 `.tiff`/`.webp`，PS 只扫 `.jpg/.jpeg/.png/.gif/.bmp/.heic`
+    （已在 Python 层显式扩充，符合"新增支持"条）
+  - Python 的 exclude 规则比 PS 宽（substring + startswith），PS 只 startswith
+    + wildcard；遇到差异优先以 Python 为准（更保守 = 更多排除）
+
+对拍办法：同一源目录分别跑 PS `-DryRun` 和 `brain asset-scan`，diff 两份
+manifest 的 `source_path + rule + target_dir` 列。
 
 通过之后再做 B6 删除。
 
@@ -123,3 +131,5 @@ A3 收尾已经删掉了 `tools/ollama-pipeline/`、`tools/lib/`、`tools/feedba
 | 日期 | 说明 |
 |---|---|
 | 2026-04-21 | 首版；列出 5 个文件、风险等级、6 批迁移路线。 |
+| 2026-04-21 | B1 完成（stats ec3d0e1 + dedup 95cdac4）；B2 完成（overview-cards 删除 beaea16）。 |
+| 2026-04-21 | **B3 完成**：`brain_agents/asset_migrate.py` + CLI `brain asset-scan` / `brain asset-migrate-execute`。30 个新 pytest（classify 所有分支 / exclude / scan 写 TSV / execute copy+mtime+collision+trash+missing+brain-inbox+latest-manifest），全量 139 passed。PS 版暂保留做 3 周对拍。 |

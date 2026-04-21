@@ -744,6 +744,68 @@ def asset_stats_cmd(
     typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
 
 
+@app.command("asset-scan")
+def asset_scan_cmd(
+    source: str = typer.Option(..., "--source", help="Source directory to scan (e.g. D:\\BaiduSyncdisk)"),
+    job_name: str = typer.Option("", "--job", help="Job label for the manifest filename (default: job-<ts>)"),
+    assets_root: str = typer.Option("", "--assets-root", help="Override paths.assets_root"),
+) -> None:
+    """B3 · Stage-1 scanner (Python port of
+    tools/asset/brain-asset-migrate.ps1, scan half). Walks ``--source``,
+    runs the classification rules, writes
+    ``<assets_root>/_migration/<job>-manifest.tsv``. Zero token,
+    zero file writes outside the manifest. Review the TSV, then run
+    ``brain asset-migrate-execute``.
+    """
+    from pathlib import Path as _P
+
+    from brain_agents.asset_migrate import run_scan
+
+    out = run_scan(
+        source=_P(source),
+        job_name=job_name or None,
+        assets_root=_P(assets_root) if assets_root.strip() else None,
+    )
+    if out.get("status") == "ok":
+        out = {
+            "status": out["status"],
+            "source": out["source"],
+            "job_name": out["job_name"],
+            "manifest_path": out.get("manifest_path"),
+            "total": out["total"],
+            "excluded": out["excluded"],
+            "rows": len(out["rows"]),
+            "counts": out["counts"],
+            "sizes_mb": {k: round(v / (1024 * 1024), 1) for k, v in out["sizes"].items()},
+        }
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
+@app.command("asset-migrate-execute")
+def asset_migrate_execute_cmd(
+    manifest_path: str = typer.Option("", "--manifest-path", help="Specific manifest TSV (default: latest under _migration/)"),
+    assets_root: str = typer.Option("", "--assets-root", help="Override paths.assets_root"),
+    brain_root: str = typer.Option("", "--brain-root", help="Override paths.content_root (for text files going to 99-inbox)"),
+) -> None:
+    """B3 · Stage-3 executor (Python port of
+    tools/asset/brain-asset-migrate.ps1, execute half). Reads a
+    manifest, copies each row's source to its destination (mtime
+    preserved), renames-on-collision using the source's mtime, and
+    writes a sibling ``*-execute.log``. Source files are **never**
+    deleted (``trash-candidate`` rows are logged only).
+    """
+    from pathlib import Path as _P
+
+    from brain_agents.asset_migrate import run_execute
+
+    out = run_execute(
+        manifest_path=_P(manifest_path) if manifest_path.strip() else None,
+        assets_root=_P(assets_root) if assets_root.strip() else None,
+        brain_root=_P(brain_root) if brain_root.strip() else None,
+    )
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
 @app.command("ingest-log-recent")
 def ingest_log_recent_cmd(
     days: int = typer.Option(7, "--days", min=1, max=90),
