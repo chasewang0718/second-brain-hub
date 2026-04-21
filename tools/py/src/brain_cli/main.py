@@ -698,6 +698,28 @@ def ingest_backup_now_cmd(
     typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
 
 
+@app.command("asset-stats")
+def asset_stats_cmd(
+    assets_root: str = typer.Option("", "--assets-root", help="Override paths.assets_root"),
+    content_root: str = typer.Option("", "--content-root", help="Override paths.content_root"),
+    no_write: bool = typer.Option(False, "--no-write", help="Skip writing the Markdown report"),
+) -> None:
+    """B1 · Pure-metadata scan of brain-assets (Python port of
+    tools/asset/brain-asset-stats.ps1). Writes a MD report to
+    04-journal/brain-assets-stats-YYYY-MM-DD.md by default.
+    """
+    from pathlib import Path as _P
+
+    from brain_agents.asset_stats import run
+
+    out = run(
+        assets_root=_P(assets_root) if assets_root.strip() else None,
+        content_root=_P(content_root) if content_root.strip() else None,
+        write_report=not no_write,
+    )
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
 @app.command("ingest-log-recent")
 def ingest_log_recent_cmd(
     days: int = typer.Option(7, "--days", min=1, max=90),
