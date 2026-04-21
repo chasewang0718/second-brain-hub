@@ -398,7 +398,8 @@ Monica/Dex 式人际关系助手.
 
 | 能力 | CLI / 入口 |
 |---|---|
-| 查询联系人 / 逾期 / 会前上下文 | `brain who`, `brain overdue`, `brain context-for-meeting` |
+| 查询联系人 / 逾期 / 会前上下文 | `brain who`, `brain overdue`（可选 `--channel wechat` 等）, `brain context-for-meeting`（`--since-days`、`--format md`） |
+| T3 合并候选（手动审） | `brain merge-candidates list`, `accept <id> [--keep PID]`, `reject <id>` |
 | 微信 decoder 导入 | `brain wechat-sync [--dry-run]` |
 | iPhone 备份定位 / 通讯录 / WhatsApp | `brain backup-ios-locate`, `brain contacts-ingest-ios`, `brain whatsapp-ingest-ios`（参见 `architecture/ios-backup-runbook.md`） |
 | 本地模型做不了的条目 | `brain cloud queue list` → `brain cloud flush`（写锁 + cursor-agent；日志在 Tier A 根 `.brain-cloud-flush-last.log`） |
@@ -481,6 +482,8 @@ Monica/Dex 式人际关系助手.
 | 2026-04-20 | v4 | 重大转向: 放弃"AI 守原则"范式, 改为"AI 全自主 + git 兜底". Python + LangGraph + MCP 栈. 五大终端目标明确. LangGraph 从 Cut 到采纳 |
 | 2026-04-20 | **v5** | **零预算 + 改名 + Python 唯一**. 云端兜底改为 `_cursor_queue/` 人工触发 Cursor 订阅处理. LoRA 砍掉 (0 预算). DuckDB 确定为结构化 DB (否决 Supabase). 目录改名 `D:\brain` → `D:\second-brain-content`, `D:\brain-assets` → `D:\second-brain-assets` (Phase F0 一次性). 老 PS 代码 A3 时整体删除. 原则降级为偏好. TypeScript 栈经评估拒绝. |
 | 2026-04-21 | — | **附录**: 人际 CRM 多源栈（persons / identifiers / interactions / cloud_queue）与相关 `brain` 子命令写入路线图；runbook `architecture/ios-backup-runbook.md`。 |
+| 2026-04-21 | — | **CRM / identity**: 中国大陆手机号归一化为 `86` + 合法号段（避免把 NANP `1…` 误判为 CN）；存量 `person_identifiers` 用 `brain identifiers-repair [--dry-run]` 重写并按冲突写入 `merge_candidates`（T3）。CLI 约定：子命令 stdout 仅输出可解析文本/JSON（Shell Profile 若在 Python 启动前打印横幅，与本仓库无关）。 |
+| 2026-04-21 | — | **CRM CLI**: `overdue --channel`、`context-for-meeting --since-days/--format md`、`merge-candidates list|accept|reject`。 |
 
 ---
 

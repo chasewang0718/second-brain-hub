@@ -9,6 +9,32 @@ from typing import Any
 
 from brain_memory.structured import execute, query
 
+# Mainland China mobile, national significant number (11 digits, leading 1).
+# Tuned to avoid treating NANP domestic numbers like 14155550123 as CN (collision with coarse 1[3-9]… rules).
+_CN_DOMESTIC_MOBILE = re.compile(
+    r"^1(?:3\d{9}|4[5-9]\d{8}|5[0-35-9]\d{8}|6[2567]\d{8}|7[0-8]\d{8}|8\d{9}|9[0-35-9]\d{8})$"
+)
+
+
+def normalize_phone_digits(raw: str) -> str:
+    """Normalize phone for matching: digits-only canonical form; CN mobiles → leading 86."""
+    d = re.sub(r"\D", "", raw or "")
+    if not d:
+        return ""
+    # Common dial-out prefix 0086xxxxxxxxxxx → 86xxxxxxxxxxxx
+    if d.startswith("0086"):
+        d = "86" + d[4:]
+    # Already E.164-like China (+86 …)
+    if len(d) == 13 and d.startswith("86"):
+        rest = d[2:]
+        if _CN_DOMESTIC_MOBILE.match(rest):
+            return d
+        return d
+    # 11-digit domestic CN mobile
+    if _CN_DOMESTIC_MOBILE.match(d):
+        return "86" + d
+    return d
+
 
 def normalize_value(kind: str, value: str) -> str:
     k = kind.lower()
@@ -16,9 +42,96 @@ def normalize_value(kind: str, value: str) -> str:
     if k in ("email", "gmail_addr"):
         return raw.lower()
     if k == "phone":
-        digits = re.sub(r"\D", "", raw)
-        return digits
+        return normalize_phone_digits(raw)
     return raw.lower()
+
+
+def repair_phone_identifiers(*, dry_run: bool = False) -> dict[str, Any]:
+    """
+    Rewrite stored phone value_normalized rows to the current normalize_phone_digits rules.
+
+    - Same-person duplicate after canonicalization: drop redundant row.
+    - Another person already owns the canonical digits: enqueue merge_candidates (T3); skip update.
+    """
+    rows = query(
+        """
+        SELECT id, person_id, kind, value_normalized, value_original
+        FROM person_identifiers
+        WHERE lower(kind) = 'phone'
+        ORDER BY id
+        """
+    )
+    stats: dict[str, Any] = {
+        "rows_scanned": 0,
+        "skipped_unchanged": 0,
+        "updated": 0,
+        "deleted_duplicate": 0,
+        "merge_candidates": 0,
+        "dry_run": dry_run,
+    }
+    for r in rows:
+        stats["rows_scanned"] += 1
+        oid = int(r["id"])
+        pid = str(r["person_id"])
+        old_norm = str(r["value_normalized"] or "")
+        original = r["value_original"]
+        seed = str(original).strip() if original else old_norm
+        new_norm = normalize_value("phone", seed)
+        if new_norm == old_norm:
+            stats["skipped_unchanged"] += 1
+            continue
+
+        dup_same = query(
+            """
+            SELECT id FROM person_identifiers
+            WHERE person_id = ? AND lower(kind) = 'phone' AND value_normalized = ? AND id <> ?
+            """,
+            [pid, new_norm, oid],
+        )
+        if dup_same:
+            if not dry_run:
+                execute("DELETE FROM person_identifiers WHERE id = ?", [oid])
+            stats["deleted_duplicate"] += 1
+            continue
+
+        others = query(
+            """
+            SELECT DISTINCT person_id FROM person_identifiers
+            WHERE lower(kind) = 'phone' AND value_normalized = ? AND person_id <> ?
+            """,
+            [new_norm, pid],
+        )
+        opids = [str(x["person_id"]) for x in others]
+        if len(opids) > 1:
+            _enqueue_merge_candidate(
+                pid,
+                opids[0],
+                0.45,
+                "phone_repair_ambiguous",
+                {"new_norm": new_norm, "old_normalized": old_norm, "row_id": oid, "owners": opids},
+            )
+            stats["merge_candidates"] += 1
+            continue
+        if len(opids) == 1:
+            _enqueue_merge_candidate(
+                pid,
+                opids[0],
+                0.6,
+                "phone_repair_collision",
+                {"new_norm": new_norm, "old_normalized": old_norm, "row_id": oid},
+            )
+            stats["merge_candidates"] += 1
+            continue
+
+        if not dry_run:
+            execute(
+                "UPDATE person_identifiers SET value_normalized = ? WHERE id = ?",
+                [new_norm, oid],
+            )
+        stats["updated"] += 1
+
+    stats["status"] = "dry_run" if dry_run else "ok"
+    return stats
 
 
 def list_persons_for_identifier(kind: str, value: str) -> list[str]:

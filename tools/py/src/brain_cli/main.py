@@ -17,6 +17,9 @@ queue_app = typer.Typer(help="Inspect pending cloud_queue rows")
 cloud_app.add_typer(queue_app, name="queue")
 app.add_typer(cloud_app, name="cloud")
 
+merge_candidates_app = typer.Typer(help="T3 identity merge queue (manual review)")
+app.add_typer(merge_candidates_app, name="merge-candidates")
+
 
 def _ensure_utf8_stdout() -> None:
     if hasattr(sys.stdout, "reconfigure"):
@@ -299,6 +302,23 @@ def people_seed_demo_cmd() -> None:
     typer.echo(json.dumps(seed_demo_people_data(), ensure_ascii=False, indent=2))
 
 
+@app.command("identifiers-repair")
+def identifiers_repair_cmd(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Plan only; no DuckDB writes"),
+    phones_only: bool = typer.Option(
+        True,
+        "--phones-only/--all-kinds",
+        help="Currently only phone identifiers are rewritten (default).",
+    ),
+) -> None:
+    from brain_agents.identity_resolver import repair_phone_identifiers
+
+    if not phones_only:
+        typer.echo(json.dumps({"status": "error", "reason": "only_phone_supported"}, ensure_ascii=False, indent=2))
+        raise typer.Exit(code=1)
+    typer.echo(json.dumps(repair_phone_identifiers(dry_run=dry_run), ensure_ascii=False, indent=2, default=str))
+
+
 @app.command("who")
 def who_cmd(name: str = typer.Argument(..., help="Name or alias")) -> None:
     from brain_agents.people import who
@@ -307,24 +327,63 @@ def who_cmd(name: str = typer.Argument(..., help="Name or alias")) -> None:
 
 
 @app.command("overdue")
-def overdue_cmd(days: int = typer.Option(30, min=1, max=365)) -> None:
+def overdue_cmd(
+    days: int = typer.Option(30, min=1, max=365),
+    channel: str = typer.Option("", "--channel", "-c", help="Filter by last interaction on this channel (e.g. wechat)"),
+) -> None:
     from brain_agents.people import overdue
 
-    typer.echo(json.dumps(overdue(days=days), ensure_ascii=False, indent=2, default=str))
+    ch = channel.strip() or None
+    typer.echo(json.dumps(overdue(days=days, channel=ch), ensure_ascii=False, indent=2, default=str))
 
 
 @app.command("context-for-meeting")
-def context_for_meeting_cmd(name: str = typer.Argument(..., help="Name or alias"), limit: int = typer.Option(5, min=1, max=20)) -> None:
-    from brain_agents.people import context_for_meeting
+def context_for_meeting_cmd(
+    name: str = typer.Argument(..., help="Name or alias"),
+    limit: int = typer.Option(5, min=1, max=20),
+    since_days: int = typer.Option(0, "--since-days", min=0, max=3650, help="Only interactions newer than N days (0 = all)"),
+    fmt: str = typer.Option("json", "--format", "-f", help="json or md"),
+) -> None:
+    from brain_agents.people import context_for_meeting, context_for_meeting_markdown
 
-    typer.echo(
-        json.dumps(
-            context_for_meeting(name_or_alias=name, limit=limit),
-            ensure_ascii=False,
-            indent=2,
-            default=str,
-        )
+    payload = context_for_meeting(
+        name_or_alias=name,
+        limit=limit,
+        since_days=since_days if since_days > 0 else None,
     )
+    if fmt.strip().lower() == "md":
+        typer.echo(context_for_meeting_markdown(payload))
+        return
+    typer.echo(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+
+
+@merge_candidates_app.command("list")
+def merge_candidates_list_cmd(
+    status: str = typer.Option("pending", "--status", help="pending | accepted | rejected | all"),
+    limit: int = typer.Option(50, min=1, max=500),
+) -> None:
+    from brain_agents.merge_candidates import list_candidates
+
+    rows = list_candidates(status=status.strip().lower(), limit=limit)
+    typer.echo(json.dumps(rows, ensure_ascii=False, indent=2, default=str))
+
+
+@merge_candidates_app.command("accept")
+def merge_candidates_accept_cmd(
+    candidate_id: int = typer.Argument(..., help="merge_candidates.id"),
+    keep: str = typer.Option("", "--keep", help="person_id to retain (default: lexicographically smaller of the pair)"),
+) -> None:
+    from brain_agents.merge_candidates import accept_candidate
+
+    kp = keep.strip() or None
+    typer.echo(json.dumps(accept_candidate(candidate_id, kept_person_id=kp), ensure_ascii=False, indent=2, default=str))
+
+
+@merge_candidates_app.command("reject")
+def merge_candidates_reject_cmd(candidate_id: int = typer.Argument(..., help="merge_candidates.id")) -> None:
+    from brain_agents.merge_candidates import reject_candidate
+
+    typer.echo(json.dumps(reject_candidate(candidate_id), ensure_ascii=False, indent=2, default=str))
 
 
 @app.command("structure-history")
@@ -487,5 +546,10 @@ def cloud_flush_cmd(
 
 def main() -> None:
     _ensure_utf8_stdout()
+    # Subcommands emit JSON or single-line text on stdout for scripts. Any shell profile banner
+    # printed before Python starts is outside this module; avoid extra stdout noise here.
     app()
 
+
+if __name__ == "__main__":
+    main()
