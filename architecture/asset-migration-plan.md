@@ -73,9 +73,9 @@ A3 收尾已经删掉了 `tools/ollama-pipeline/`、`tools/lib/`、`tools/feedba
 
 | 批次 | 迁移项 | 产出 Python 模块 | 预计工时 | 风险 |
 |---:|---|---|---:|---|
-| B1 | `brain-asset-stats.ps1` | `brain_agents/asset_stats.py` + CLI `brain asset-stats` | 2h | 低 |
-| B1 | `brain-asset-dedup.ps1` | `brain_agents/asset_dedup.py` + CLI `brain asset-dedup` | 2h | 低 |
-| B2 | `brain-asset-overview-cards.ps1` | **直接删除**，不迁移 | 10m | 低 |
+| B1 | ✅ `brain-asset-stats.ps1` → `brain_agents/asset_stats.py` + CLI `brain asset-stats` (ec3d0e1) | | 2h | 低 |
+| B1 | ✅ `brain-asset-dedup.ps1` → `brain_agents/asset_dedup.py` + CLI `brain asset-dedup` (95cdac4) | | 2h | 低 |
+| B2 | ✅ `brain-asset-overview-cards.ps1` **已删除**（不迁移） | | 10m | 低 |
 | B3 | `brain-asset-migrate.ps1` | `brain_agents/asset_migrate.py`（三模式）+ CLI `brain asset-migrate` | 1d | 中 |
 | B4 | `brain-asset-source-cleanup.ps1` | `brain_agents/asset_source_cleanup.py` + CLI | 4h | 中（删源） |
 | B5 | 清理 `.reference` profile 的 `gasset-*` 函数，改调 Python CLI | 修 `Microsoft.PowerShell_profile.ps1.reference` | 30m | 低 |
