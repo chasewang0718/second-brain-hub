@@ -13,6 +13,14 @@ from brain_core.config import load_paths_config, load_runtime_config
 app = typer.Typer(help="second-brain-hub Python CLI")
 
 
+def _ensure_utf8_stdout() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 @app.command("health")
 def health_cmd() -> None:
     typer.echo("ok")
@@ -309,5 +317,6 @@ def weekly_review_cmd() -> None:
 
 
 def main() -> None:
+    _ensure_utf8_stdout()
     app()
 
