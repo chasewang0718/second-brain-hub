@@ -806,6 +806,28 @@ def asset_migrate_execute_cmd(
     typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
 
 
+@app.command("asset-parity-diff")
+def asset_parity_diff_cmd(
+    a_path: str = typer.Option(..., "--a", help="First manifest TSV (conventionally the PS -DryRun output)"),
+    b_path: str = typer.Option(..., "--b", help="Second manifest TSV (conventionally brain asset-scan output)"),
+    output: str = typer.Option("", "--output", help="Write a Markdown parity report to this path"),
+) -> None:
+    """E2 · Diff two asset-migrate manifests.
+
+    Used during the 3-week parity window after B3/B4 to confirm
+    ``brain asset-scan`` (Python) agrees with
+    ``brain-asset-migrate.ps1 -DryRun`` (PowerShell) before
+    deleting the PS scripts. Pure read-only on both inputs.
+
+    Join key is ``source_path`` (case-insensitive, slash-normalized).
+    Mismatch dimensions: rule / action / target_dir.
+    """
+    from brain_agents.asset_migrate_parity import run
+
+    out = run(a_path=a_path, b_path=b_path, output_path=output or None)
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
 @app.command("asset-source-cleanup")
 def asset_source_cleanup_cmd(
     manifest_path: str = typer.Option("", "--manifest-path", help="Specific manifest TSV (default: latest under _migration/)"),

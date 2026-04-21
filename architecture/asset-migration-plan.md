@@ -112,10 +112,14 @@ manifest 的 `source_path + rule + target_dir` 列。
 
 ## 退出标志
 
-- [ ] B1-B6 全部合并
-- [ ] `tools/asset/` 目录删除
-- [ ] `.reference` profile 里 `gasset`/`gasset-scan`/`gasset-migrate` 三个函数
-      改调 `python -m uv run brain asset-*`
+- [x] B1 完成（stats ec3d0e1 + dedup 95cdac4）
+- [x] B2 完成（overview-cards 删除 beaea16）
+- [x] B3 完成（migrate Python 版 ad4c2fd）
+- [x] B4 完成（source-cleanup Python 版 3b260dc，默认 dry-run 安全升级）
+- [x] E2 完成（对拍工具 + runbook，见 `asset-parity-runbook.md`）
+- [ ] 3 次对拍（间隔 ≥ 1 周，覆盖 ≥ 2 个源目录）全部通过或只有可接受差异
+- [ ] B5 完成（改 `.reference` profile 的 `gasset-*` 调 Python CLI）
+- [ ] B6 完成（删 `tools/asset/*.ps1`）
 - [ ] ROADMAP changelog 加 "A4 收尾 · 弃用 PS asset 脚本" 条目
 
 ---
@@ -134,3 +138,4 @@ manifest 的 `source_path + rule + target_dir` 列。
 | 2026-04-21 | B1 完成（stats ec3d0e1 + dedup 95cdac4）；B2 完成（overview-cards 删除 beaea16）。 |
 | 2026-04-21 | **B3 完成**：`brain_agents/asset_migrate.py` + CLI `brain asset-scan` / `brain asset-migrate-execute`。30 个新 pytest（classify 所有分支 / exclude / scan 写 TSV / execute copy+mtime+collision+trash+missing+brain-inbox+latest-manifest），全量 139 passed。PS 版暂保留做 3 周对拍。 |
 | 2026-04-21 | **B4 完成**：`brain_agents/asset_source_cleanup.py` + CLI `brain asset-source-cleanup`。**默认改为 dry-run**（PS 默认真删，安全升级）；`--apply` 显式真删；`--source-root` 显式开启空目录清扫（PS 硬编码 `D:\BaiduSyncdisk`，移除后更安全）。21 个新 pytest（OK 行解析 + manifest fallback + 三道安全门 + dry-run 不删 + apply 真删 + latest-manifest + 空目录级联清扫 + `--no-delete-empty-dirs` 关断），全量 **160 passed**。PS 版暂保留 3 周对拍。 |
+| 2026-04-21 | **E2 完成**：`brain_agents/asset_migrate_parity.py` + CLI `brain asset-parity-diff`——为 3 周对拍期准备的纯 Python manifest 对比工具。`load_manifest` 读 TSV（容错老格式），`diff_manifests` 以 `source_path`（大小写无关 + 斜杠归一化）为键，三维（rule/action/target_dir）比对；`target_dir` 的斜杠/反斜杠差异自动归一化；`render_markdown` 出整体汇总 + 每类计数 + 三张差异明细（each 前 20 条），`\|` 字符自动转义。CLI 支持 `--output` 写 MD 报告。配套 `architecture/asset-parity-runbook.md` 讲清"预期可接受"vs"必须停下修"的差异分类。17 个新 pytest（identical/disjoint/mismatch/case-insensitive/slash-normalize/pipe-escape/missing-side/report-write），全量 **177 passed**。|
