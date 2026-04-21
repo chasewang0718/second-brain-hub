@@ -295,6 +295,30 @@ def image_inbox_ingest_cmd(
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+@app.command("audio-inbox-ingest")
+def audio_inbox_ingest_cmd(
+    limit: int = typer.Option(1, min=1, max=100, help="How many audio files to process"),
+    paths: list[str] = typer.Option(
+        None,
+        "--path",
+        "-p",
+        help="Explicit audio path to ingest (repeatable). External files are copied into audio_inbox_dir before processing.",
+    ),
+    no_copy: bool = typer.Option(
+        False,
+        "--no-copy",
+        help="When using --path, process the file in place instead of copying it into audio_inbox_dir.",
+    ),
+) -> None:
+    from brain_agents.audio_inbox import ingest_audio_inbox, ingest_audio_paths
+
+    if paths:
+        result = ingest_audio_paths(paths, copy_into_inbox=not no_copy)
+    else:
+        result = ingest_audio_inbox(limit=limit)
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 @app.command("write")
 def write_cmd(
     topic: str = typer.Option(..., help="Writing topic"),

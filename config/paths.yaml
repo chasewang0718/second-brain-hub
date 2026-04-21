@@ -18,6 +18,8 @@ paths:
   pdf_inbox_dir: "D:\\second-brain-assets\\99-inbox"
   # A3 图像分支 (paddleocr 可选; 未安装时写入 OCR pending 指针卡)
   image_inbox_dir: "D:\\second-brain-assets\\99-inbox-image"
+  # A3 音频分支 (faster-whisper 可选; 未安装时写入 ASR pending 指针卡)
+  audio_inbox_dir: "D:\\second-brain-assets\\99-inbox-audio"
   ollama_output_dir: "D:\\second-brain-assets\\_migration\\ollama-output"
 
   # Escalation 相关
