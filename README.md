@@ -53,6 +53,18 @@ gollama-pilot
 脚本通过 `config/paths.yaml` 读取 `brain_content_root`，不直接硬编码路径。
 修改内容仓位置只需改一处。
 
+## WeChat 联动（新增）
+
+可将 `wechat-decoder` 的聊天导出同步到人际关系目录：
+
+```powershell
+python .\tools\one-off\wechat_to_people_bridge.py
+```
+
+默认读取 `C:\dev-projects\wechat-decoder\artifacts\chat_file_transfer_assistant.json`，
+并写入 `D:\second-brain-content\06-people\wechat\` 与
+`D:\second-brain-content\08-indexes\wechat-bridge-index.md`。
+
 ## License
 
 Private / personal use. No warranty.

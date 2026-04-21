@@ -1,7 +1,7 @@
 # 我的隐私规则（Privacy Rules）
 
 > **📍 权威副本**: `C:\dev-projects\second-brain-hub\rules\privacy.md`
-> 镜像: `D:\brain\00-memory\my-privacy-rules.md` (该位置被 `AGENTS.md` 引用为"全域认知层"必读)
+> 镜像: `D:\second-brain-content\00-memory\my-privacy-rules.md` (该位置被 `AGENTS.md` 引用为"全域认知层"必读)
 > 编辑时优先改 hub 本文件, 手动同步到 `00-memory/my-privacy-rules.md`.
 
 ---
@@ -32,8 +32,8 @@ Chase 已决策**不把任何二进制资产上传到 GitHub**。三层模型：
 
 | Tier | 位置 | 是否上传 GitHub | AI 可见性 |
 |---|---|---|---|
-| **A** | `D:\brain\` | ✅ 是 | ✅ 全部读写 |
-| **B** | `D:\brain-assets\` | ❌ **永远不** | ✅ AI 可读内容生成指针卡 |
+| **A** | `D:\second-brain-content\` | ✅ 是 | ✅ 全部读写 |
+| **B** | `D:\second-brain-assets\` | ❌ **永远不** | ✅ AI 可读内容生成指针卡 |
 | **C** | 由 Chase 自管理 | ❌ 永远不 | ❌ **agent 永远不触碰**（硬红线） |
 
 **Tier C 的硬红线**（L3 级不可逾越）：
@@ -132,3 +132,4 @@ AI 在往 brain 写入**任何新内容**前，心里过一遍这五条：
 *最后更新：*
 - *2026-04-19: 由 AI 在 Phase 0 brain 升级中创建。"已确认规则"反映 Chase 2026-04-19 的明确决策；"待澄清"段落是 AI 预留的引导问题。*
 - *2026-04-19 (资产管理)：新增"三层 Tier 规则"—— 二进制资产走 Tier B 本地 (`D:\brain-assets\`)；敏感资产走 Tier C (agent 永不触碰，黑名单文件 `~/.brain-exclude.txt`)。*
+- *2026-04-20 (v5 改名)：Tier A/B 路径从 `D:\brain*` 迁至 `D:\second-brain-*`。*

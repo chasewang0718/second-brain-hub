@@ -2,9 +2,36 @@
 
 > **📍 权威副本 (Source of Truth)**
 > 本文件是 AI 行为总协议. 位于 `C:\dev-projects\second-brain-hub\rules\AGENTS.md`.
-> `D:\brain\AGENTS.md` 是一份**镜像**, 供 Cursor 等 agent 进入 brain 工作区时自动加载.
-> **编辑协议时, 优先改本文件**, 然后把改动同步到 `D:\brain\AGENTS.md`.
-> 将来 `brain-content` 仓建立后, 同步将自动化.
+> `D:\second-brain-content\AGENTS.md` 是一份**镜像**, 供 Cursor 等 agent 进入内容仓工作区时自动加载.
+> **编辑协议时, 优先改本文件**, 然后把改动同步到 `D:\second-brain-content\AGENTS.md`.
+
+---
+
+> ## ⚠️ v5 重要转向 (2026-04-20)
+>
+> 本协议在 **ROADMAP v5** 定稿后发生**范式转向**. 以下条款相对 v4 及之前有重大变化:
+>
+> 1. **"原则 / my-principles / 选型三铁律" 从"最高准则"降级为"偏好参考"**
+>    - AI 作决策时**优先**遵循, 但"业内最佳实践"可 override
+>    - 违反时在 commit message 注明理由即可, 不阻塞执行
+>    - `my-principles.md` / `my-boundaries.md` 不再是 supreme law
+>
+> 2. **非协商硬红线 (取代"原则")** — 只有三条不容越界:
+>    - **Tier C 隐私黑名单** (`~/.brain-exclude.txt`): AI 永不触碰 (GDPR 合规, 法律风险)
+>    - **破坏性 git** (`push --force` / `reset --hard` / 删 `.git/`): 必须明确用户同意 (数据丢失风险)
+>    - **Git 安全网**: 每次 agent 写入**必经** auto-commit + backup branch (系统基本盘)
+>
+> 3. **物理目录改名**: `D:\brain` → `D:\second-brain-content` (Tier A) / `D:\brain-assets` → `D:\second-brain-assets` (Tier B)
+>
+> 4. **范式转向**: "AI 提议 + 人审批" → "**AI 自主执行 + git 可回滚**"
+>    - 推进 hub 类任务: **直接执行**, 不再"先提议等点头"
+>    - 规模任务 (>10 文件) 仍建议分多个 commit 提升可读性
+>
+> 5. **云端兜底取消**: `rules/cursor-delegated-escalation.md` 替代 `cloud-local-delegation.md`
+>
+> 详见 [`architecture/ROADMAP.md`](../architecture/ROADMAP.md) §0.
+>
+> **本文件的其余条款 (§1-§11) 保留, 但"原则"类措辞按上述 #1 软化解读.**
 
 ---
 
@@ -42,11 +69,12 @@
 - `00-memory/my-privacy-rules.md` — 我的隐私边界（什么进 git / 什么不进 / 什么加密）
 - `00-memory/ai-change-log.md` — AI 行为审计日志（每月追加，供 Chase 事后审查）
 
-### 2. 基于原则给建议
+### 2. 基于偏好给建议 (v5: 已从"原则"降级)
 
-- 所有建议必须**符合** `my-principles.md` 里的五条原则。
-- 违反原则的做法（如：自建 Auth、上 Kubernetes、微服务化、自研 CI/CD、深挖类型体操）**主动劝阻**。
-- 技术选型优先参考 `my-stack.md`。如果要推荐栈外的东西，**必须说明为什么现有栈不行**。
+- 建议**优先参考** `my-principles.md` 和 `my-stack.md`，但它们是**偏好**而非硬约束
+- 业内最佳实践可以 override 个人偏好; AI 推荐栈外方案时在 commit message 注明理由即可
+- 仍**主动提示**重大偏离 (如从 Python 换到 TS, 从嵌入式 DB 换到 Postgres) 让用户有知情权
+- 硬红线只有三条: Tier C 黑名单 / 破坏性 git / git 安全网 (见顶部 v5 横幅)
 
 ### 3. 尊重我的学习阶段
 
@@ -539,8 +567,8 @@ brain 支持管理**非 Markdown 资产**（照片、扫描件、PDF、视频、
 
 | Tier | 内容 | 位置 | Git | 云端 | AI 可见 |
 |---|---|---|---|---|---|
-| **A** | Markdown 知识 + **指针卡** | `D:\brain\` | ✅ | ✅ GitHub | ✅ 全部可读可搜 |
-| **B** | 二进制资产原文件 | `D:\brain-assets\` | ❌ | ❌（可选 rclone 备份） | ✅ AI 可读内容生成摘要 |
+| **A** | Markdown 知识 + **指针卡** | `D:\second-brain-content\` | ✅ | ✅ GitHub | ✅ 全部可读可搜 |
+| **B** | 二进制资产原文件 | `D:\second-brain-assets\` | ❌ | ❌（可选 rclone 备份） | ✅ AI 可读内容生成摘要 |
 | **C** | 隐私 / 敏感 | 由 Chase 自管理（如 `D:\private\`） | ❌ | ❌ | ❌ **agent 永远不触碰** |
 
 **关联机制**：Tier B 每个资产对应 Tier A 一张**指针卡**（`.md` + frontmatter），内含 AI 生成摘要 + 原文件路径。`brain-ask` 搜的是指针卡文字，找到后可一键打开原文件。
@@ -553,8 +581,8 @@ brain 支持管理**非 Markdown 资产**（照片、扫描件、PDF、视频、
 | `.tex`（LaTeX 源文件） | **Tier A** | 当代码/片段处理 |
 | `.pdf`（有文字可读） | **Tier B** | agent 读内容 → 指针卡含摘要 |
 | `.jpg/.png/.jpeg`（图片） | **Tier B** | 视体量：日常照片按 YYYY-MM 归档（**不 AI 读**）；概念/项目配图会 AI 读生成描述 |
-| `.mp4/.mov/.m4a/.mp3/.ttf` 等 | **Tier B** | 仅元数据，**不 AI 读** |
-| 身份证/银行/露骨/私密 | **Tier C** | Chase 自建目录，写进黑名单文件；agent 完全不可见 |
+| `.mp4/.mov/.m4a/.mp3/.ttf` 等 | **Tier B** | Phase A3 后由 Python agent 用 faster-whisper / LLaVA 读内容 |
+| 身份证/银行/露骨/私密 | **Tier C** | Chase 自建目录，写进黑名单文件；agent 完全不可见 (**v5 非协商硬红线**) |
 
 #### 黑名单机制（Tier C 硬防线）
 
@@ -572,21 +600,22 @@ D:\BaiduSyncdisk\某个私密目录\
 **生效位置**：
 - 所有 `gasset-*` 工具启动前先读这份，命中则跳过（连文件名都不向 agent 传递）
 - `gsave-file` 拒绝导入命中路径的文件
-- AI 在被要求处理 `brain-assets/` 外的路径时，先检查黑名单
+- AI 在被要求处理 `second-brain-assets/` 外的路径时，先检查黑名单
+- Phase F1 之后的 Python agent 同样遵守 (`brain_core.safety.check_blacklist`)
 
-这份文件**不进任何 git 仓**（放在用户主目录，不进 brain/brain-tools）。
+这份文件**不进任何 git 仓**（放在用户主目录，不进 content/hub）。
 
-#### `brain-assets/` 的动态结构（同 brain 的演化哲学）
+#### `second-brain-assets/` 的动态结构（同内容仓的演化哲学）
 
-Tier B 目录结构**和 brain 一样是内容驱动的**，不预设死规则：
+Tier B 目录结构**和 second-brain-content 一样是内容驱动的**，不预设死规则：
 
 - AI 在 L1 权限下**可动态建子目录**（如 `11-fonts/chinese/`）
 - AI 在 L1 权限下**可建新顶层目录**（如 `16-books/`），但自动场景保守（不建，扔 `98-staging/`）
 - 镜像 brain 的目录（`01-concepts/`, `03-projects/`, `06-people/`, `07-life/`）按需出现，**不预建**
 
-初始骨架（2026-04-19）：
+初始骨架（2026-04-20, v5 新增 `_cursor_queue/`）：
 ```
-brain-assets/
+second-brain-assets/
 ├── 99-inbox/         新文件默认落这
 ├── 10-photos/        个人照片, 按 YYYY-MM
 ├── 11-fonts/         字体
@@ -594,6 +623,8 @@ brain-assets/
 ├── 13-audio/         音频
 ├── 14-archives/      压缩包
 ├── 98-staging/       agent 临时 / 不确定的
+├── _cursor_queue/    本地失败任务 → Cursor 人工兜底 (见 cursor-delegated-escalation.md)
+├── _escalation/      v4 及之前兼容, 逐步废弃
 └── _migration/       批量迁移 manifest / 日志
 ```
 
@@ -603,7 +634,7 @@ brain-assets/
 ---
 title: <人类可读标题>
 asset_type: pdf | jpg | mp4 | m4a | ttf | zip | ...
-asset_path: D:\brain-assets\<...>\<file>
+asset_path: D:\second-brain-assets\<...>\<file>
 asset_size: 12.4 MB
 asset_sha256: <前 12 位>
 source_original_path: <迁移前的原始路径>（便于追溯）
@@ -648,7 +679,7 @@ tags: [...]
 
 ## 目录速查
 
-**Tier A · 本仓 `D:\brain\`**（Git / Markdown Only）：
+**Tier A · 内容仓 `D:\second-brain-content\`**（Git / Markdown Only）：
 ```
 00-memory/    → 核心认知 + 全域 brain 配置（AI 必读；L1 可改 + 强制 TL;DR）
 01-concepts/  → 技术概念词典（L1）
@@ -662,7 +693,7 @@ tags: [...]
 99-inbox/     → 草稿/未分类（L1；"全扔" = L3）
 ```
 
-**Tier B · `D:\brain-assets\`**（非 Git / 二进制资产；见第 11 条）：
+**Tier B · `D:\second-brain-assets\`**（非 Git / 二进制资产；见第 11 条）：
 ```
 10-photos/    → 个人照片，按 YYYY-MM 归档（纯规则，不 AI 读）
 11-fonts/     → 字体
@@ -676,6 +707,33 @@ _migration/   → 批量迁移 manifest / 日志
 ```
 
 **Tier C · 由 Chase 自管理**（agent 永远不触碰；见第 11 条 + `00-memory/my-privacy-rules.md`）
+
+---
+
+### 12. hub 路线图调度协议（2026-04-20 新增）
+
+`second-brain-hub` (本仓库) 有独立的优化路线图 [`architecture/ROADMAP.md`](../architecture/ROADMAP.md)。
+
+**触发词**（Chase 在任何 AI 会话中用下面任一）：
+
+| 触发词 | AI 动作 |
+|---|---|
+| **"推进 hub"** / **"hub 下一步"** | 读 ROADMAP → 找第一个未勾选项 → **直接执行** (v5: auto-commit + backup branch, 不再"先提议") |
+| **"hub 进度"** / **"查看 roadmap"** | 只读 ROADMAP → 报告当前位置 + 各 Phase 勾选情况, **不动文件** |
+| **"hub 验收 Phase N"** | 对照 Phase N 退出标志, 跑 eval/smoke, 出验收报告 |
+| **"hub 痛点: \<描述\>"** | 追加到 `D:\second-brain-content\04-journal\YYYY-MM-DD.md`, 打 `hub-pain` 标签 |
+| **"hub 改方向: \<理由\>"** | 讨论调整路线图, 最后升级 ROADMAP 到下一版 |
+| **"处理 cursor 队列"** | 扫 `D:\second-brain-assets\_cursor_queue/*.md` → 逐个处理 → 写 `.processed.md` |
+
+**约束**：
+- AI 不得自主跳过 Phase 顺序（除非 Chase 明说 "跳到 Phase N"）
+- AI 不得自主修改 Cut List 任何项（必须走 "hub 改方向"）
+- v5 起 "推进 hub" **直接执行**, 不再需要先提议等点头 (git 作为 undo)
+- 任何写入前**必须**建 backup 分支 + auto-commit
+
+详细调度规则见 ROADMAP.md 顶部的 "🎛️ 如何调度这份路线图" 章节。
+
+---
 
 ## 一句话总结（AI 的工作内核）
 
@@ -692,4 +750,8 @@ _migration/   → 批量迁移 manifest / 日志
 
 - *2026-04-19（资产管理）：新增第 11 条《资产管理协议》—— 三层 Tier A/B/C 模型 + 黑名单机制 + 批量迁移 4 阶段流水线。`brain-assets/` 作为 Tier B 本地资产库（非 Git），结构同 brain 一样动态演化。*
 
-*修改本文件属于绿区（透明即可）。*
+- *2026-04-20（路线图调度）：新增第 12 条《hub 路线图调度协议》—— 定义 5 个触发词 ("推进 hub" / "hub 进度" / "hub 验收" / "hub 痛点" / "hub 改方向") 让任何 AI 会话都能识别并按约定执行路线图。详细规则在 `architecture/ROADMAP.md`。*
+
+- *2026-04-20（**v5 范式转向**）：顶部新增 "v5 重要转向" 横幅. 原则从 supreme law 降级为偏好参考 (仅保留 Tier C / 破坏性 git / git 安全网 三条非协商硬红线). 物理目录改名: `D:\brain` → `D:\second-brain-content`, `D:\brain-assets` → `D:\second-brain-assets`. 第 12 条 "推进 hub" 改为直接执行 (不再提议). 新增 "处理 cursor 队列" 触发词. 云端兜底策略文档替换: `cloud-local-delegation.md` (废弃) → `cursor-delegated-escalation.md` (权威). Tier B 初始骨架加 `_cursor_queue/`. 老 PS 代码将在 Phase A3 上线时整体删除, 不渐进迁移.*
+
+*本文件可由 AI 直接编辑. v5 起原则层面的修订只需在 commit message 说明理由, 不阻塞执行. 硬红线修改仍需 L3 明确同意.*

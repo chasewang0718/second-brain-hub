@@ -1,0 +1,16 @@
+# 全局阈值配置 (Phase 1)
+# 说明: 本文件只放阈值/预算, 不放路径.
+
+schema_version: "1.0"
+updated: "2026-04-20"
+
+pdf:
+  confidence_below: 0.70
+  timeout_sec: 180
+  qa_sample_percent: 15
+
+budget:
+  monthly_usd: 20
+  warn_at_pct: 70
+  degrade_at_pct: 90
+  halt_at_pct: 100

@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "brain": {
+      "command": "python",
+      "args": [
+        "-m",
+        "uv",
+        "run",
+        "brain",
+        "mcp-stdio"
+      ],
+      "cwd": "C:\\dev-projects\\second-brain-hub\\tools\\py"
+    }
+  }
+}
+

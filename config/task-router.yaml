@@ -1,20 +1,21 @@
-# 通用任务委派路由表
-# 参见 rules/cloud-local-delegation.md (策略文档, 人读)
-# 本文件是机器可读的伴侣: 代码读这里的数字 + 枚举做决策.
+# 通用任务派发路由表 (v5 · 零预算 + cursor 队列兜底)
+# 参见 rules/cursor-delegated-escalation.md (策略文档, 人读).
+# 本文件是机器可读伴侣: Python dispatcher 读这里的数字 + 枚举.
 #
-# 新增任务: 加一条 tasks.<task-name>, 不用改 dispatcher 代码.
-# 改阈值: 直接改数字, 下次调用立即生效 (不需要重启).
+# v5 重大变更 (2026-04-20):
+#   - 删除所有 cloud fallback 字段 (cloud_model, fallback.executor=cloud, ...)
+#   - 改为 cursor_queue 作为失败兜底 (人工触发 Cursor 处理)
+#   - 删除月度云预算字段 (0 预算)
+#   - 路径更新: D:\brain → D:\second-brain-content, D:\brain-assets → D:\second-brain-assets
 
-schema_version: "1.0"
-updated: "2026-04-19"
+schema_version: "2.0"
+updated: "2026-04-20"
 
 # ============================================================
-# 全局默认值 (单个任务未覆盖时用这些)
+# 全局默认值 (单任务未覆盖时用)
 # ============================================================
 defaults:
-  escalation_dir: "D:\\brain-assets\\_escalation"
-  cloud_model: "claude-opus-4"      # 云端升级默认模型
-  cost_budget_usd_monthly: 20        # 月度云预算
+  cursor_queue_dir: "D:\\second-brain-assets\\_cursor_queue"   # 本地失败入队
   telemetry_log_dir: "C:\\dev-projects\\second-brain-hub\\telemetry\\logs"
 
 # ============================================================
@@ -23,197 +24,192 @@ defaults:
 tasks:
 
   # --------------------------------------------------------
-  # PDF 分类 (当前已实现)
+  # PDF 分类 (Phase A3 前由 PS pipeline 跑; A3 后由 Python agent 跑)
   # --------------------------------------------------------
   pdf-classify:
     description: "PDF 文档分类 + 路径分配 + 摘要"
-    mode: batch-pipeline              # A/B/C 模式 (见 rules/cloud-local-delegation.md §2)
+    mode: batch-pipeline
     primary:
       executor: local
       model: "qwen2.5:14b-instruct"
       timeout_sec: 300
       max_retries_on_schema_fail: 2
-    fallback:
-      executor: cloud
-      model: "claude-opus-4"
-    qa:
-      sample_rate: 0.15
-      auditor: cloud
-      auditor_model: "claude-opus-4"
+    # v5 无 cloud fallback. 本地失败入队人工处理.
+    on_failure:
+      action: enqueue_cursor
+      queue_dir: "D:\\second-brain-assets\\_cursor_queue"
+      include_context: ["source_file", "source_hash", "local_attempt", "reason"]
     escalate_when:
       confidence_below: 0.70
       schema_fail_count: 2
       category_equals: "other"
       timeout_exceeded: true
     input:
-      source_dir: "D:\\brain-assets\\99-inbox"
+      source_dir: "D:\\second-brain-assets\\99-inbox"
       file_pattern: "*.pdf"
     output:
-      target_root: "D:\\brain-assets"   # Tier B (二进制原文件)
-      pointer_root: "D:\\brain"          # Tier A (指针卡 Markdown)
+      target_root: "D:\\second-brain-assets"       # Tier B
+      pointer_root: "D:\\second-brain-content"     # Tier A
 
   # --------------------------------------------------------
-  # Inbox 纯文本路由 (未实现; 规划中)
+  # Inbox 纯文本路由 (Phase A2 落地)
   # --------------------------------------------------------
   inbox-text-route:
-    description: "D:/brain/99-inbox/paste-*.md 自动识别主题 + 分类归档"
+    description: "Caps+D paste-*.md 自动分类 + 实体抽取 + 标签 + 归档"
     mode: batch-pipeline
     primary:
       executor: local
       model: "qwen2.5:14b-instruct"
       timeout_sec: 60
-    fallback:
-      executor: cloud
-      model: "claude-opus-4"
-    qa:
-      sample_rate: 0.10
-      auditor: cloud
-      auditor_model: "claude-opus-4"
+    on_failure:
+      action: enqueue_cursor
+      queue_dir: "D:\\second-brain-assets\\_cursor_queue"
     escalate_when:
       confidence_below: 0.75
-      action_equals_create_new_top_level_dir: true  # 新顶层目录升云决策
-      touches_existing_memory_file: true            # 改 00-memory/ 升云
-      ambiguous_intent: true                        # 跨主题文档升云
+      action_equals_create_new_top_level_dir: true
+      touches_existing_memory_file: true
+      ambiguous_intent: true
     input:
-      source_dir: "D:\\brain\\99-inbox"
+      source_dir: "D:\\second-brain-content\\99-inbox"
       file_pattern: "paste-*.md"
     output:
-      target_root: "D:\\brain"
+      target_root: "D:\\second-brain-content"
     status: not-implemented
 
   # --------------------------------------------------------
-  # Inbox 文件路由 (未实现; 规划中)
+  # Inbox 文件路由 (Phase A3 落地)
   # --------------------------------------------------------
   inbox-file-route:
-    description: "D:/brain-assets/99-inbox/ 下任意非 PDF 文件分类"
+    description: "D:/second-brain-assets/99-inbox/ 非 PDF 文件分类"
     mode: batch-pipeline
     primary:
       executor: local
-      # 根据文件类型选模型 (由 dispatcher 决定)
       model_by_type:
         "*.jpg|*.png|*.jpeg": "llava:13b"
-        "*.mp3|*.m4a|*.wav": "whisper-large"
-        "*.pdf": "qwen2.5:14b-instruct"  # 复用 pdf-classify
-        "*": "rule-based"                 # 扩展名/EXIF/mtime 纯规则
+        "*.mp3|*.m4a|*.wav": "faster-whisper"
+        "*.pdf": "qwen2.5:14b-instruct"
+        "*": "rule-based"
       timeout_sec: 180
-    fallback:
-      executor: cloud
-      model: "claude-opus-4"
-    qa:
-      sample_rate: 0.15
-      auditor: cloud
+    on_failure:
+      action: enqueue_cursor
+      queue_dir: "D:\\second-brain-assets\\_cursor_queue"
     escalate_when:
       confidence_below: 0.70
       timeout_exceeded: true
     input:
-      source_dir: "D:\\brain-assets\\99-inbox"
+      source_dir: "D:\\second-brain-assets\\99-inbox"
       file_pattern: "*"
     status: not-implemented
 
   # --------------------------------------------------------
-  # Caps+D 交互快速修复 (未实现; 规划中)
+  # Caps+D 交互快速问答 (Phase A1 落地)
   # --------------------------------------------------------
-  capsd-quick-fix:
-    description: "Caps+D 热键: 选中代码 → 本地小模型修复/解释/重写"
+  capsd-quick-ask:
+    description: "Caps+D 长按: 快速问答本地 brain"
     mode: interactive
     primary:
       executor: local
-      model: "qwen2.5:3b"               # 小模型, 本地 <2s
+      model: "qwen2.5:3b"
       timeout_sec: 10
-    fallback:
-      executor: cloud
-      model: "claude-sonnet-4.6"        # 交互场景用 sonnet 够快
-    qa:
-      sample_rate: 0                     # 用户自己就是 QA
+    on_failure:
+      action: prompt_user_to_use_cursor     # 交互场景直接提醒用户去 Cursor 问
     escalate_when:
       confidence_below: 0.80
-      involves_refactor: true            # 含"重构"关键词升云
-      touches_files_count_above: 3       # 影响 > 3 文件升云
-      involves_security_sensitive: true
     status: not-implemented
 
   # --------------------------------------------------------
-  # 图像分类 (规划中, 资产管理扩展)
+  # 图像分类 (Phase A3 落地)
   # --------------------------------------------------------
   image-classify:
-    description: "照片/图片分类, 人脸/场景/时间定位"
+    description: "照片/图片分类, 场景/时间定位 (无人脸识别)"
     mode: batch-pipeline
     primary:
       executor: local
       model: "llava:13b"
       timeout_sec: 120
-    fallback:
-      executor: cloud
-      model: "claude-opus-4"             # 支持图像输入
-    qa:
-      sample_rate: 0.05                  # 图像量大, 抽样低一些
+    on_failure:
+      action: enqueue_cursor
+      queue_dir: "D:\\second-brain-assets\\_cursor_queue"
     escalate_when:
       confidence_below: 0.70
-      contains_people: true              # 有人脸 → 敏感, 升云确认
+      contains_people: true                # 有人脸入队 (隐私二次确认)
     status: not-implemented
 
   # --------------------------------------------------------
-  # 代码重构 / 长任务 (走模式 C, 云端主导)
+  # 写作助手 (Phase A4 落地)
   # --------------------------------------------------------
-  code-refactor:
-    description: "多文件代码重构 / 架构调整"
-    mode: long-running-agent
+  write-assist:
+    description: "四层知识模型组合 + self-critique + provenance"
+    mode: interactive
     primary:
-      executor: cloud                    # 云端主导
-      model: "claude-opus-4"
-      timeout_sec: 1800                  # 30 分钟
-    tools_local:                         # 云端 agent 可调本地脚本做脏活
-      - "grep"
-      - "ls"
-      - "git-diff"
-      - "read-file"
-      - "write-file"
-    qa:
-      sample_rate: 0                     # 用户 review 每次
-    escalate_when: {}                    # 已经是云端, 无"升云"
+      executor: local
+      model: "qwen2.5:14b-instruct"
+      timeout_sec: 600
+    on_failure:
+      action: enqueue_cursor
+      queue_dir: "D:\\second-brain-assets\\_cursor_queue"
+      reason_hint: "writing_polish"          # Cursor 处理时知道这是润色请求
+    escalate_when:
+      confidence_below: 0.70
+      cliche_hit_count_above: 3             # 陈词命中太多入队让 Cursor 改
+    status: not-implemented
+
+  # --------------------------------------------------------
+  # 人际关系引擎 (Phase A5 落地)
+  # --------------------------------------------------------
+  people-extract:
+    description: "从对话/文本中抽取人物 + 事件 + 承诺"
+    mode: batch-pipeline
+    primary:
+      executor: local
+      model: "qwen2.5:14b-instruct"
+      timeout_sec: 60
+    on_failure:
+      action: enqueue_cursor
+      queue_dir: "D:\\second-brain-assets\\_cursor_queue"
+    escalate_when:
+      confidence_below: 0.75
+      alias_ambiguity: true                 # 别名歧义入队人工确认
     status: not-implemented
 
 # ============================================================
-# 升云优先级规则 (所有任务共用, 按顺序匹配)
+# 优先级规则 (所有任务共用, 按顺序匹配)
 # ============================================================
 priority_rules:
   # 硬红线: Tier C 黑名单, 无条件终止
   - match:
-      source_path_in_blacklist: true     # 命中 ~/.brain-exclude.txt
+      source_path_in_blacklist: true       # 命中 ~/.brain-exclude.txt
     action: terminate
     reason: "Tier C sensitive path"
 
-  # L3 风险: 用户必须明确同意
+  # PII 检测命中: 进 Tier C, 不嵌入向量
+  - match:
+      pii_detected: true                    # presidio 检出 BSN/银行卡/医疗号
+    action: route_to_tier_c
+    target_dir: "D:\\second-brain-content\\06-sensitive"
+    note: "skip vector embedding"
+
+  # L3 破坏性 git: 必须用户明确同意
   - match:
       operation_in: ["git-push-force", "git-reset-hard", "delete-dot-git"]
     action: require_user_consent
     level: L3
 
-  # 升云但标记敏感
-  - match:
-      contains_sensitive_field: true     # 证件号/金额/密码
-    action: escalate
-    note: "cloud will desensitize in summary"
-
 # ============================================================
-# 预算保护
-# ============================================================
-budget_guardrails:
-  monthly_usd: 20
-  warn_at_pct: 70                        # 70% 时 analyze.ps1 周报标黄
-  degrade_at_pct: 90                     # 90% 降 QA 抽样率
-  halt_at_pct: 100                       # 100% 停止主动升云
-
-  degrade_actions:
-    qa_sample_rate_multiplier: 0.33      # 15% → 5%
-    escalate_confidence_delta: -0.10     # 阈值更松, 更多进 escalation
-
-# ============================================================
-# 反馈循环 (把 escalation 结果反哺本地 few-shot)
+# 反馈循环 (把 cursor_queue 处理结果反哺本地 few-shot)
 # ============================================================
 feedback_loop:
   enabled: true
-  harvest_from: "D:\\brain-assets\\_escalation\\*.processed.json"
+  harvest_from: "D:\\second-brain-assets\\_cursor_queue\\*.processed.md"
   dest_few_shot_dir: "C:\\dev-projects\\second-brain-hub\\prompts\\few-shot"
-  review_before_merge: true              # 新 few-shot 需要人 review 才入主 prompt
-  schedule: "weekly"                     # 每周合成一次
+  review_before_merge: false               # v5 下自动入库, git 可回退
+  schedule: "weekly"
+
+# ============================================================
+# Agent 安全网 (每次 agent 写入必经)
+# ============================================================
+safety_net:
+  auto_commit: true
+  backup_branch_pattern: "agent/{agent_name}/{timestamp}"
+  commit_message_prefix: "[agent:{agent_name}]"
+  restore_command: "brain restore --last-clean"

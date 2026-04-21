@@ -1,0 +1,31 @@
+# 全局路径配置 (v5)
+# 说明: 本文件只放路径, 不放阈值 (见 thresholds.yaml).
+# v5 改名: D:\brain → D:\second-brain-content, D:\brain-assets → D:\second-brain-assets
+
+schema_version: "2.0"
+updated: "2026-04-20"
+
+paths:
+  # Tier A / Tier B 根目录
+  content_root: "D:\\second-brain-content"
+  assets_root: "D:\\second-brain-assets"
+
+  # 向后兼容别名 (Phase A3 弃用 PS 脚本时一并删除)
+  brain_root: "D:\\second-brain-content"
+  brain_assets_root: "D:\\second-brain-assets"
+
+  # PDF pipeline 关键路径
+  pdf_inbox_dir: "D:\\second-brain-assets\\99-inbox"
+  ollama_output_dir: "D:\\second-brain-assets\\_migration\\ollama-output"
+
+  # Escalation 相关
+  # v4 之前: escalation_dir 是云端兜底队列
+  # v5: 改为 cursor_queue_dir, 人工触发 Cursor 处理
+  cursor_queue_dir: "D:\\second-brain-assets\\_cursor_queue"
+  escalation_dir: "D:\\second-brain-assets\\_escalation"       # 向后兼容, 逐步废弃
+
+  # hub 仓内日志目录
+  telemetry_logs_dir: "C:\\dev-projects\\second-brain-hub\\telemetry\\logs"
+
+  # Python 工程
+  py_root: "C:\\dev-projects\\second-brain-hub\\tools\\py"

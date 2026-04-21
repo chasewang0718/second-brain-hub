@@ -100,7 +100,7 @@
 | 任务 | 工具 | 时间 |
 |---|---|---|
 | 3.1 图片分类 pipeline | `llava:13b` 或 `qwen2-vl:7b`，复用 task-router 架构 | 4h |
-| 3.2 人脸/场景聚类（可选）| DeepFace + ChromaDB | 1-2 天 |
+| 3.2 场景聚类（可选）| ChromaDB | 1-2 天 |
 | 3.3 录音转文本 | **faster-whisper**（GPU 加速）| 4h |
 | 3.4 扫描 PDF OCR fallback | Tesseract → PaddleOCR（阶梯式）| 3h |
 | 3.5 新任务注册到 task-router.yaml | 证明架构通用性 | 1h |
