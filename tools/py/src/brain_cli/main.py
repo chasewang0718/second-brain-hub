@@ -307,6 +307,40 @@ def graph_build_cmd() -> None:
     typer.echo(json.dumps({"status": "ok", **stats}, ensure_ascii=False, indent=2, default=str))
 
 
+@app.command("graph-rebuild-if-stale")
+def graph_rebuild_if_stale_cmd(
+    max_age_hours: float = typer.Option(
+        0.0,
+        "--max-age-hours",
+        min=0.0,
+        help="Force rebuild when Kuzu is older than this, even if DuckDB hasn't changed. 0 disables the wall-clock check.",
+    ),
+    force: bool = typer.Option(False, "--force", help="Rebuild even if the view is fresh"),
+) -> None:
+    """Rebuild Kuzu only when DuckDB is newer (or the view is missing /
+    forced / older than ``--max-age-hours``). Cheap ``fresh`` path is a
+    few ms of mtime stat calls; real rebuild takes several seconds.
+    """
+    from brain_agents.graph_build import rebuild_if_stale
+
+    max_s = int(max_age_hours * 3600) if max_age_hours > 0 else None
+    out = rebuild_if_stale(max_age_seconds=max_s, force=force)
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
+@app.command("graph-staleness")
+def graph_staleness_cmd(
+    max_age_hours: float = typer.Option(0.0, "--max-age-hours", min=0.0),
+) -> None:
+    """Return only the staleness diagnostic (no rebuild). Useful for
+    monitoring / Task Scheduler pre-checks.
+    """
+    from brain_agents.graph_build import graph_staleness
+
+    max_s = int(max_age_hours * 3600) if max_age_hours > 0 else None
+    typer.echo(json.dumps(graph_staleness(max_age_seconds=max_s), ensure_ascii=False, indent=2, default=str))
+
+
 @app.command("graph-fof")
 def graph_fof_cmd(
     person_id: str = typer.Argument(..., help="Anchor person_id"),

@@ -50,6 +50,114 @@ def _duckdb_path() -> Path:
     return logs_dir / "brain-telemetry.duckdb"
 
 
+def graph_staleness(kuzu_dir: Path | None = None, *, max_age_seconds: int | None = None) -> dict[str, Any]:
+    """Return a diagnostic dict describing whether the Kuzu view is stale.
+
+    Rules (checked in order; first match wins):
+
+    - ``missing``        : no Kuzu DB file at all → rebuild
+    - ``no_duckdb``      : DuckDB source missing → cannot rebuild, caller
+                           should tolerate (shouldn't happen in prod)
+    - ``duckdb_newer``   : DuckDB mtime > Kuzu mtime → source changed,
+                           graph is stale
+    - ``older_than_max`` : Kuzu mtime is older than ``max_age_seconds``
+                           wall-clock; only checked when ``max_age_seconds``
+                           is provided (None = skip time-based staleness)
+    - ``fresh``          : none of the above → skip rebuild
+
+    ``stale`` in the output is ``True`` for all cases except ``fresh``
+    and ``no_duckdb``.
+    """
+    import time as _time
+
+    kuzu_dir = kuzu_dir or default_kuzu_dir()
+    kuzu_file = _db_file(kuzu_dir)
+    duckdb_file = _duckdb_path()
+
+    if not kuzu_file.exists():
+        return {
+            "stale": True,
+            "reason": "missing",
+            "kuzu_file": str(kuzu_file),
+            "kuzu_mtime": None,
+            "duckdb_mtime": float(duckdb_file.stat().st_mtime) if duckdb_file.exists() else None,
+        }
+
+    kuzu_mtime = float(kuzu_file.stat().st_mtime)
+
+    if not duckdb_file.exists():
+        return {
+            "stale": False,
+            "reason": "no_duckdb",
+            "kuzu_file": str(kuzu_file),
+            "kuzu_mtime": kuzu_mtime,
+            "duckdb_mtime": None,
+        }
+
+    duckdb_mtime = float(duckdb_file.stat().st_mtime)
+    if duckdb_mtime > kuzu_mtime:
+        return {
+            "stale": True,
+            "reason": "duckdb_newer",
+            "kuzu_file": str(kuzu_file),
+            "kuzu_mtime": kuzu_mtime,
+            "duckdb_mtime": duckdb_mtime,
+            "lag_seconds": round(duckdb_mtime - kuzu_mtime, 2),
+        }
+
+    if max_age_seconds is not None and (_time.time() - kuzu_mtime) > max_age_seconds:
+        return {
+            "stale": True,
+            "reason": "older_than_max",
+            "kuzu_file": str(kuzu_file),
+            "kuzu_mtime": kuzu_mtime,
+            "duckdb_mtime": duckdb_mtime,
+            "age_seconds": round(_time.time() - kuzu_mtime, 2),
+            "max_age_seconds": int(max_age_seconds),
+        }
+
+    return {
+        "stale": False,
+        "reason": "fresh",
+        "kuzu_file": str(kuzu_file),
+        "kuzu_mtime": kuzu_mtime,
+        "duckdb_mtime": duckdb_mtime,
+    }
+
+
+def rebuild_if_stale(
+    *,
+    kuzu_dir: Path | None = None,
+    max_age_seconds: int | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Call :func:`build_graph` only if the Kuzu view is stale (or
+    ``force=True``). Returns a dict combining staleness diagnostics and,
+    when a rebuild ran, the ``build_graph`` stats.
+
+    On ``RuntimeError`` from ``build_graph`` (e.g. ``kuzu_missing``),
+    returns ``{"status":"skipped","reason":...}`` instead of raising,
+    consistent with the rest of the F3 surface.
+    """
+    diag = graph_staleness(kuzu_dir=kuzu_dir, max_age_seconds=max_age_seconds)
+    should_build = bool(force) or diag["stale"]
+
+    if not should_build:
+        return {"status": "ok", "rebuilt": False, "staleness": diag}
+
+    try:
+        stats = build_graph(kuzu_dir=kuzu_dir)
+    except RuntimeError as exc:
+        return {"status": "skipped", "reason": str(exc), "staleness": diag}
+    return {
+        "status": "ok",
+        "rebuilt": True,
+        "reason": "forced" if force and not diag["stale"] else diag["reason"],
+        "staleness": diag,
+        "stats": stats,
+    }
+
+
 def _clean_dir(path: Path) -> None:
     if path.exists():
         shutil.rmtree(path, ignore_errors=True)

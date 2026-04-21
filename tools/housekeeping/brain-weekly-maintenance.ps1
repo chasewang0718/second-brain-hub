@@ -63,7 +63,11 @@ $results = @()
 $results += Invoke-BrainStep -Name 'identifiers-repair' -Args @('identifiers-repair','--kinds','all')
 $results += Invoke-BrainStep -Name 'cloud-flush-dry-run' -Args @('cloud','flush','--dry-run')
 if (-not $SkipGraph) {
-    $results += Invoke-BrainStep -Name 'graph-build' -Args @('graph-build')
+    # Cheap path: only rebuild when DuckDB is newer (or --max-age-hours
+    # triggers). On a quiet week this is a sub-second no-op; on a busy
+    # one it's the same ~7s full rebuild we used to do unconditionally.
+    $results += Invoke-BrainStep -Name 'graph-rebuild-if-stale' `
+        -Args @('graph-rebuild-if-stale','--max-age-hours','168')
     # Graph → T3 merge queue sync. Default stays dry-run: we surface
     # the count in the log, require human review before actually
     # inserting pending candidates.
