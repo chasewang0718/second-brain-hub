@@ -96,14 +96,27 @@ def _keyword_hits(query: str, limit: int) -> list[dict[str, Any]]:
     return rows[:limit]
 
 
-def ask(query: str, limit: int = 5) -> list[dict[str, Any]]:
+def ask(query: str, limit: int = 5, mode: str = "auto") -> list[dict[str, Any]]:
     query = query.strip()
     if not query:
         return []
+    mode = mode.lower().strip()
+    if mode not in {"auto", "fast", "deep"}:
+        mode = "auto"
     txt = _keyword_hits(query=query, limit=max(limit, 8))
 
-    # Fast path: when keyword hits are strong enough, skip heavy vector import.
-    if len(txt) >= limit and sum(float(item.get("_term_hits", 0.0)) for item in txt[:limit]) >= limit * 2:
+    # Fast mode avoids vector fallback completely for responsive CLI usage.
+    if mode == "fast":
+        out: list[dict[str, Any]] = []
+        for row in txt[:limit]:
+            item = dict(row)
+            item["method"] = "hybrid"
+            item.pop("_term_hits", None)
+            out.append(item)
+        return out
+
+    # Auto mode: when keyword hits are strong enough, skip heavy vector import.
+    if mode == "auto" and len(txt) >= limit and sum(float(item.get("_term_hits", 0.0)) for item in txt[:limit]) >= limit * 2:
         out: list[dict[str, Any]] = []
         for row in txt[:limit]:
             item = dict(row)

@@ -51,7 +51,12 @@ def telemetry_append_cmd(
         payload = sys.stdin.read()
     if not payload.strip():
         payload = "{}"
-    event_id = append_event(source=source, event=event, detail_json=payload)
+    try:
+        event_id = append_event(source=source, event=event, detail_json=payload)
+    except json.JSONDecodeError as exc:
+        raise typer.BadParameter(
+            f"detail_json is not valid JSON ({exc}); use --detail-file or pipe JSON via stdin to avoid PowerShell escaping issues."
+        ) from exc
     typer.echo(f"appended telemetry id={event_id}")
 
 
@@ -153,6 +158,7 @@ def ask_cmd(
     query: str = typer.Argument("", help="Ask query"),
     query_file: str = typer.Option("", help="Read UTF-8 query text from file"),
     limit: int = typer.Option(5, min=1, max=20),
+    mode: str = typer.Option("fast", help="ask mode: fast|auto|deep (default fast for responsive CLI)"),
 ) -> None:
     from brain_agents.ask import ask as ask_engine
 
@@ -164,7 +170,9 @@ def ask_cmd(
     final_query = final_query.strip()
     if not final_query:
         raise typer.BadParameter("query is required (arg, --query-file, or stdin)")
-    typer.echo(json.dumps(ask_engine(query=final_query, limit=limit), ensure_ascii=False, indent=2))
+    if mode.lower().strip() not in {"auto", "fast", "deep"}:
+        raise typer.BadParameter("mode must be one of: auto, fast, deep")
+    typer.echo(json.dumps(ask_engine(query=final_query, limit=limit, mode=mode), ensure_ascii=False, indent=2))
 
 
 @app.command("watch")
@@ -236,7 +244,7 @@ def write_cmd(
     topic: str = typer.Option(..., help="Writing topic"),
     platform: str = typer.Option("default", help="Target platform, e.g. xiaohongshu/linkedin"),
     reader: str = typer.Option("general reader", help="Target reader persona"),
-    source_limit: int = typer.Option(5, min=1, max=20),
+    source_limit: int = typer.Option(5, "--source-limit", "--limit", min=1, max=20),
 ) -> None:
     from brain_agents.write_assist import write_draft
 
