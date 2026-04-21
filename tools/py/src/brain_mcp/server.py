@@ -7,7 +7,8 @@ import json
 from fastmcp import FastMCP
 
 from brain_agents.ask import ask as ask_agent
-from brain_agents.people import context_for_meeting, overdue, who
+from brain_agents.merge_candidates import accept_candidate, list_candidates, reject_candidate
+from brain_agents.people import context_for_meeting, context_for_meeting_markdown, overdue, who
 from brain_core.config import load_paths_config
 from brain_core.inbox import list_inbox
 from brain_core.safety import list_history as list_git_history
@@ -74,15 +75,49 @@ def who_tool(name: str) -> list[dict]:
 
 
 @mcp.tool
-def overdue_tool(days: int = 30) -> list[dict]:
-    rows = overdue(days=days)
+def overdue_tool(days: int = 30, channel: str = "") -> list[dict]:
+    """When channel is set (e.g. wechat), uses last interaction on that channel per person."""
+    ch = channel.strip() or None
+    rows = overdue(days=days, channel=ch)
     return json.loads(json.dumps(rows, ensure_ascii=False, default=str))
 
 
 @mcp.tool
-def context_for_meeting_tool(name: str, limit: int = 5) -> dict:
-    rows = context_for_meeting(name_or_alias=name, limit=limit)
+def context_for_meeting_tool(
+    name: str,
+    limit: int = 5,
+    since_days: int = 0,
+    output_format: str = "json",
+) -> dict | str:
+    """output_format: json | md — md returns Markdown text for pasting into notes."""
+    payload = context_for_meeting(
+        name_or_alias=name,
+        limit=limit,
+        since_days=since_days if since_days > 0 else None,
+    )
+    if output_format.strip().lower() == "md":
+        return context_for_meeting_markdown(payload)
+    return json.loads(json.dumps(payload, ensure_ascii=False, default=str))
+
+
+@mcp.tool
+def merge_candidates_list_tool(status: str = "pending", limit: int = 50) -> list[dict]:
+    """T3 identity merge queue. status: pending | accepted | rejected | all."""
+    rows = list_candidates(status=status.strip().lower(), limit=limit)
     return json.loads(json.dumps(rows, ensure_ascii=False, default=str))
+
+
+@mcp.tool
+def merge_candidate_accept_tool(candidate_id: int, kept_person_id: str = "") -> dict:
+    """Apply a pending merge_candidates row. Empty kept_person_id keeps lexicographically smaller person_id."""
+    kp = kept_person_id.strip() or None
+    return accept_candidate(candidate_id, kept_person_id=kp)
+
+
+@mcp.tool
+def merge_candidate_reject_tool(candidate_id: int) -> dict:
+    """Reject a pending merge_candidates row without merging."""
+    return reject_candidate(candidate_id)
 
 
 def run_stdio() -> None:

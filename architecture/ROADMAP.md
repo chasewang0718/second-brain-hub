@@ -399,6 +399,7 @@ Monica/Dex 式人际关系助手.
 | 能力 | CLI / 入口 |
 |---|---|
 | 查询联系人 / 逾期 / 会前上下文 | `brain who`, `brain overdue`（可选 `--channel wechat` 等）, `brain context-for-meeting`（`--since-days`、`--format md`） |
+| 同上（MCP） | `who_tool`, `overdue_tool`（`channel`）, `context_for_meeting_tool`（`since_days` / `output_format`）, `merge_candidates_list_tool`, `merge_candidate_accept_tool`, `merge_candidate_reject_tool`（`brain_mcp/server.py`） |
 | T3 合并候选（手动审） | `brain merge-candidates list`, `accept <id> [--keep PID]`, `reject <id>` |
 | 微信 decoder 导入 | `brain wechat-sync [--dry-run]` |
 | iPhone 备份定位 / 通讯录 / WhatsApp | `brain backup-ios-locate`, `brain contacts-ingest-ios`, `brain whatsapp-ingest-ios`（参见 `architecture/ios-backup-runbook.md`） |
@@ -485,6 +486,8 @@ Monica/Dex 式人际关系助手.
 | 2026-04-21 | — | **CRM / identity**: 中国大陆手机号归一化为 `86` + 合法号段（避免把 NANP `1…` 误判为 CN）；存量 `person_identifiers` 用 `brain identifiers-repair [--dry-run]` 重写并按冲突写入 `merge_candidates`（T3）。CLI 约定：子命令 stdout 仅输出可解析文本/JSON（Shell Profile 若在 Python 启动前打印横幅，与本仓库无关）。 |
 | 2026-04-21 | — | **CRM CLI**: `overdue --channel`、`context-for-meeting --since-days/--format md`、`merge-candidates list|accept|reject`。 |
 | 2026-04-21 | — | **Tests / runbook**: pytest 化（`tools/py/tests/`），`smoke_people`/`test_identity_phone_normalize`/`test_merge_candidates`/`test_people_cli` 共 22 用例；新增 `cloud flush` runbook `architecture/cloud-flush-runbook.md`。 |
+| 2026-04-21 | — | **Caps+D PDF**: AHK `ClipWait(..., 1)` 捕获文件列表；`file_inbox.ingest_pdf_paths` + `~/.brain-exclude.txt` 黑名单；Stage3 E 验收表追加一行。 |
+| 2026-04-21 | — | **MCP**: people / merge-candidates 工具与 CLI 对齐（channel、since_days、md、T3 accept/reject）。 |
 
 ---
 
