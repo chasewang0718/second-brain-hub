@@ -530,14 +530,38 @@ def merge_candidates_reject_cmd(candidate_id: int = typer.Argument(..., help="me
 def merge_candidates_sync_from_graph_cmd(
     dry_run: bool = typer.Option(True, "--dry-run/--apply", help="Preview proposals (default) or insert pending rows"),
     max_inserts: int = typer.Option(500, min=1, max=5000, help="Safety cap on --apply writes"),
+    auto_apply_min_score: float = typer.Option(
+        0.0,
+        "--auto-apply-min-score",
+        min=0.0,
+        max=1.0,
+        help=(
+            "When --apply is also set, proposed pairs with score >= this threshold "
+            "are auto-merged through accept_candidate (immediate merge_persons + "
+            "merge_log entry). Default 0.0 = opt-out (all inserts stay pending). "
+            "Recommended 0.95 = auto-merge only phone-level matches; stronger than "
+            "email/wxid (which score 0.92-0.93 and stay pending)."
+        ),
+    ),
 ) -> None:
     """Scan the Kuzu graph for cross-person shared identifiers and
     enqueue any pair not yet captured by merge_candidates or merge_log.
+
+    With ``--auto-apply-min-score 0.95`` (and ``--apply``), high-
+    confidence pairs merge immediately; the rest stay pending for
+    human review via ``brain merge-candidates accept/reject``.
     Skips gracefully if the graph is not built.
     """
     from brain_agents.merge_candidates import sync_from_graph
 
-    out = sync_from_graph(dry_run=dry_run, max_inserts=max_inserts)
+    # 0.0 is the typer default meaning "not set"; pass None to keep
+    # the Python side single-source-of-truth on what counts as opt-in.
+    threshold: float | None = auto_apply_min_score if auto_apply_min_score > 0 else None
+    out = sync_from_graph(
+        dry_run=dry_run,
+        max_inserts=max_inserts,
+        auto_apply_min_score=threshold,
+    )
     typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
 
 

@@ -16,6 +16,10 @@
     立即跑一次 (不注册)
 .PARAMETER Unregister
     注销任务
+.PARAMETER AutoApplyMinScore
+    传给 brain-weekly-maintenance.ps1 的 -AutoApplyMinScore. 默认 0 = 关闭自动合并,
+    只跑 dry-run 预览. 推荐 0.95 = 仅 phone 级自动合并 (email / wxid 的 0.92-0.93
+    仍留 pending 等人工 accept). 更低的阈值会把 email / wxid 也吞进去, 不推荐.
 #>
 
 [CmdletBinding()]
@@ -23,7 +27,8 @@ param(
     [string]$Time = '23:00',
     [string]$DayOfWeek = 'Sunday',
     [switch]$Unregister,
-    [switch]$RunNow
+    [switch]$RunNow,
+    [double]$AutoApplyMinScore = 0.0
 )
 
 $TaskName = 'BrainWeeklyMaintenance'
@@ -40,14 +45,16 @@ if ($Unregister) {
     return
 }
 
+$scoreStr = $AutoApplyMinScore.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+
 if ($RunNow) {
-    Write-Host '立即运行任务 (不注册)...' -ForegroundColor Cyan
-    & powershell -NoProfile -File $scriptPath
+    Write-Host "立即运行任务 (不注册)... AutoApplyMinScore=$scoreStr" -ForegroundColor Cyan
+    & powershell -NoProfile -File $scriptPath -AutoApplyMinScore $AutoApplyMinScore
     return
 }
 
-$action    = New-ScheduledTaskAction -Execute 'powershell.exe' `
-              -Argument "-NoProfile -WindowStyle Hidden -File `"$scriptPath`""
+$taskArgs = "-NoProfile -WindowStyle Hidden -File `"$scriptPath`" -AutoApplyMinScore $scoreStr"
+$action   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $taskArgs
 $trigger   = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $DayOfWeek -At $Time
 $settings  = New-ScheduledTaskSettingsSet -StartWhenAvailable `
               -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
@@ -59,7 +66,8 @@ Register-ScheduledTask -TaskName $TaskName `
     -Description "每周 $DayOfWeek $Time 跑 brain identifiers-repair / cloud flush --dry-run / graph-build" `
     -Force | Out-Null
 
-Write-Host "已注册任务: $TaskName (每周 $DayOfWeek $Time)" -ForegroundColor Green
+Write-Host "已注册任务: $TaskName (每周 $DayOfWeek $Time, AutoApplyMinScore=$scoreStr)" -ForegroundColor Green
 Write-Host "查看:   Get-ScheduledTask -TaskName $TaskName"
 Write-Host "立即跑: ./register-brain-weekly-maintenance.ps1 -RunNow"
+Write-Host "启用自动合 phone 对: ./register-brain-weekly-maintenance.ps1 -AutoApplyMinScore 0.95"
 Write-Host "注销:   ./register-brain-weekly-maintenance.ps1 -Unregister"

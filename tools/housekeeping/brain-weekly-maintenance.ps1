@@ -8,8 +8,13 @@
          - 存量 person_identifiers 大小写 / 号段归一, 冲突写入 merge_candidates
       2. brain cloud flush --dry-run
          - 看看 cursor_queue 里是否有待人工处理任务
-      3. brain graph-build
+      3. brain graph-rebuild-if-stale --max-age-hours 168
          - 重建 Kuzu 只读视图 (F3 POC), 供 graph-fof / graph-shared-identifier
+      4. brain merge-candidates sync-from-graph --dry-run
+         - 图 → T3 队列预览 (proposed 数写进日志, 不落盘)
+      5. (可选) brain merge-candidates sync-from-graph --apply --auto-apply-min-score X
+         - 仅当 -AutoApplyMinScore > 0 时启用. X >= 0.95 只自动合并 phone 级
+           高置信对; 更低会把 email/wxid (0.92-0.93) 也吞进去, 不推荐.
     每步独立 try/catch; 整体成功标准: 前两步 OK (第三步 Kuzu 可选).
 .NOTES
     日志: D:\second-brain-assets\_runtime\logs\brain-weekly-maintenance-YYYYMMDD.log
@@ -19,6 +24,10 @@
 [CmdletBinding()]
 param(
     [switch]$SkipGraph,
+    # Default 0 = opt-out: weekly task only runs the dry-run preview.
+    # 推荐值 0.95: 只自动合并 phone 级高置信 (默认 phone=0.95, email=0.92,
+    # wxid=0.93, 默认分 0.6, 所以 0.95 等价于 "仅自动合 phone").
+    [double]$AutoApplyMinScore = 0.0,
     [string]$BrainRepo = 'C:\dev-projects\second-brain-hub\tools\py'
 )
 
@@ -73,6 +82,14 @@ if (-not $SkipGraph) {
     # inserting pending candidates.
     $results += Invoke-BrainStep -Name 'merge-candidates-sync-graph-dryrun' `
         -Args @('merge-candidates','sync-from-graph','--dry-run')
+    # Optional auto-apply step. Runs only when the registrar passes
+    # -AutoApplyMinScore > 0; high-confidence pairs get merged
+    # immediately, the rest stay pending for human review.
+    if ($AutoApplyMinScore -gt 0) {
+        $scoreStr = $AutoApplyMinScore.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+        $results += Invoke-BrainStep -Name "merge-candidates-sync-graph-apply@$scoreStr" `
+            -Args @('merge-candidates','sync-from-graph','--apply','--auto-apply-min-score',$scoreStr)
+    }
 }
 
 $failed = @($results | Where-Object { $_.ExitCode -ne 0 })

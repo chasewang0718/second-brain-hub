@@ -17,6 +17,7 @@ authoritative_at: C:\dev-projects\second-brain-hub\architecture\e1-weekly-mainte
 | 2 | `brain cloud flush --dry-run` | 快照当前 `_cursor_queue/` 待办条目数；不触发真正 flush | 日志里一行 count + 条目清单 |
 | 3 | `brain graph-build`（可 `-SkipGraph` 跳过） | 从 DuckDB 重建 Kuzu 只读视图（F3 POC） | `<telemetry_logs_dir>/kuzu-graph/brain.kuzu` 被覆盖 |
 | 4 | `brain merge-candidates sync-from-graph --dry-run`（同 `-SkipGraph` 旁路） | 扫 Kuzu 的 shared-identifier 对，报告未被 `merge_candidates` / `merge_log` 覆盖的条数（只报数，不写） | 日志里一行 `proposed = N` |
+| 5（可选） | `brain merge-candidates sync-from-graph --apply --auto-apply-min-score <X>` | **仅当注册时传 `-AutoApplyMinScore X`（X > 0）时启用**。高置信对（score ≥ X）自动走 `accept_candidate`（合并 + `merge_log` 留痕），低置信仍写 pending 等人工。 | `auto_applied = N`；`merge_log` 新增 N 条；被合并的 person 行消失 |
 
 **不包含的动作**（见下文"为什么不做")
 
@@ -93,3 +94,4 @@ Get-ScheduledTask -TaskName BrainWeeklyMaintenance | Format-List TaskName, State
 |---|---|
 | 2026-04-21 | 首版；`brain-weekly-maintenance.ps1` + 注册脚本；每周日 23:00；三步（repair / cloud dry-run / graph-build），含 `-SkipGraph` 旁路。 |
 | 2026-04-21 | 加 "merge-candidates sync-from-graph --dry-run" 为第 4 步（随 `-SkipGraph` 一起旁路）；真正写入需人工 `brain merge-candidates sync-from-graph --apply`。 |
+| 2026-04-21 | 加第 5 步可选自动合并：脚本参数 `-AutoApplyMinScore <X>`（默认 0 = 关闭；推荐 0.95 = 仅 `phone` 级自动合，`email`/`wxid` 的 0.92/0.93 仍压 pending）；通过 `sync_from_graph(auto_apply_min_score=X)` 分桶，高置信走 `accept_candidate` 留 `merge_log` 审计。启用：`./register-brain-weekly-maintenance.ps1 -AutoApplyMinScore 0.95` 重注册。 |

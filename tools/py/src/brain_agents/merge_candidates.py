@@ -151,13 +151,33 @@ def _already_handled_pairs() -> set[tuple[str, str]]:
     return handled
 
 
-def sync_from_graph(*, dry_run: bool = False, max_inserts: int = 500) -> dict[str, Any]:
+def sync_from_graph(
+    *,
+    dry_run: bool = False,
+    max_inserts: int = 500,
+    auto_apply_min_score: float | None = None,
+) -> dict[str, Any]:
     """Pull fresh shared-identifier pairs from Kuzu and enqueue those
     DuckDB hasn't seen yet.
 
-    Returns a summary dict with ``proposed`` (always populated) and
-    ``inserted`` (0 in dry-run). Graceful ``{"status":"skipped", ...}``
-    when Kuzu is not installed or the graph has not been built.
+    When ``auto_apply_min_score`` is a float in ``(0, 1]`` and
+    ``dry_run`` is False, any proposed pair whose score is **>=**
+    the threshold is auto-merged through :func:`accept_candidate`
+    (i.e. inserted as pending, immediately accepted, and
+    absorbed->kept recorded in ``merge_log``). Lower-scoring pairs
+    stay pending for human review.
+
+    In ``dry_run=True`` mode nothing is written, but the summary
+    still reports how many pairs *would* auto-apply vs stay pending,
+    so the weekly cron can surface the counts.
+
+    Returns a summary dict with ``proposed`` (total candidate pairs),
+    ``inserted`` (rows written as pending), ``auto_applied`` (rows
+    written as pending AND immediately accepted/merged), and
+    ``auto_apply_min_score`` (echoed for audit).
+
+    Graceful ``{"status": "skipped", ...}`` when Kuzu is not
+    installed or the graph has not been built.
     """
     try:
         rows = _enumerate_shared_identifier_pairs()
@@ -165,6 +185,8 @@ def sync_from_graph(*, dry_run: bool = False, max_inserts: int = 500) -> dict[st
         return {"status": "skipped", "reason": str(exc), "dry_run": bool(dry_run)}
     except Exception as exc:  # pragma: no cover - defensive
         return {"status": "skipped", "reason": f"runtime:{exc.__class__.__name__}", "dry_run": bool(dry_run)}
+
+    threshold = _coerce_threshold(auto_apply_min_score)
 
     handled = _already_handled_pairs()
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
@@ -196,26 +218,125 @@ def sync_from_graph(*, dry_run: bool = False, max_inserts: int = 500) -> dict[st
         )
 
     proposed.sort(key=lambda r: (-r["score"], r["person_a"], r["person_b"]))
+
+    # Bucket by threshold so both dry-run and apply paths see the
+    # same split. ``would_auto_apply`` previews the auto-merge bucket
+    # in dry-run.
+    would_auto_apply: list[dict[str, Any]] = []
+    would_stay_pending: list[dict[str, Any]] = []
+    for cand in proposed:
+        if threshold is not None and float(cand["score"]) >= threshold:
+            would_auto_apply.append(cand)
+        else:
+            would_stay_pending.append(cand)
+
     inserted = 0
+    auto_applied = 0
+    auto_applied_samples: list[dict[str, Any]] = []
     if not dry_run:
-        for cand in proposed[: max(0, int(max_inserts))]:
-            execute(
-                "INSERT INTO merge_candidates (person_a, person_b, score, reason, status, detail_json) "
-                "VALUES (?, ?, ?, ?, 'pending', ?)",
-                [
-                    cand["person_a"],
-                    cand["person_b"],
-                    float(cand["score"]),
-                    cand["reason"],
-                    json.dumps(cand["detail"], ensure_ascii=False),
-                ],
-            )
+        cap = max(0, int(max_inserts))
+        budget = cap
+        # Auto-apply bucket first so the safety cap favors high-confidence
+        # pairs when the day's haul exceeds ``max_inserts``.
+        for cand in would_auto_apply:
+            if budget <= 0:
+                break
+            result = _insert_and_accept(cand)
             inserted += 1
+            budget -= 1
+            if result.get("accepted"):
+                auto_applied += 1
+                if len(auto_applied_samples) < 5:
+                    auto_applied_samples.append(
+                        {
+                            "person_a": cand["person_a"],
+                            "person_b": cand["person_b"],
+                            "score": cand["score"],
+                            "kept": result.get("kept"),
+                            "absorbed": result.get("absorbed"),
+                            "merge_candidate_id": result.get("merge_candidate_id"),
+                        }
+                    )
+        for cand in would_stay_pending:
+            if budget <= 0:
+                break
+            _insert_pending(cand)
+            inserted += 1
+            budget -= 1
 
     return {
         "status": "ok",
         "proposed": len(proposed),
         "inserted": inserted,
+        "auto_applied": auto_applied,
+        "auto_apply_min_score": threshold,
+        "would_auto_apply": len(would_auto_apply),
+        "would_stay_pending": len(would_stay_pending),
         "dry_run": bool(dry_run),
         "samples": proposed[:5],
+        "auto_applied_samples": auto_applied_samples,
+    }
+
+
+def _coerce_threshold(val: float | None) -> float | None:
+    """Normalize ``auto_apply_min_score``. Returns ``None`` when the
+    caller did not opt in, or a float in ``(0, 1]`` otherwise.
+    Non-positive or NaN values are treated as "not set" so callers
+    get the safe default (no auto-merge) instead of silently merging
+    everything.
+    """
+    if val is None:
+        return None
+    try:
+        f = float(val)
+    except (TypeError, ValueError):
+        return None
+    if not (f > 0 and f <= 1.0):
+        return None
+    return f
+
+
+def _insert_pending(cand: dict[str, Any]) -> int:
+    """Insert a single proposed pair as ``status='pending'`` and
+    return the new merge_candidates.id.
+    """
+    rows = query(
+        "INSERT INTO merge_candidates (person_a, person_b, score, reason, status, detail_json) "
+        "VALUES (?, ?, ?, ?, 'pending', ?) RETURNING id",
+        [
+            cand["person_a"],
+            cand["person_b"],
+            float(cand["score"]),
+            cand["reason"],
+            json.dumps(cand["detail"], ensure_ascii=False),
+        ],
+    )
+    return int(rows[0]["id"]) if rows else 0
+
+
+def _insert_and_accept(cand: dict[str, Any]) -> dict[str, Any]:
+    """Insert as pending AND immediately accept (merge). Returns a
+    dict with ``merge_candidate_id``, ``accepted`` (bool),
+    ``kept``, ``absorbed``. If the merge step fails for any reason
+    (e.g. one of the person_ids has since been absorbed), the row
+    stays pending and a human can sort it out — the insert is not
+    rolled back so the audit trail survives.
+    """
+    candidate_id = _insert_pending(cand)
+    try:
+        accept_out = accept_candidate(candidate_id)
+    except Exception as exc:  # pragma: no cover - defensive
+        return {
+            "merge_candidate_id": candidate_id,
+            "accepted": False,
+            "error": f"{exc.__class__.__name__}: {exc}",
+        }
+    accepted = accept_out.get("status") == "merged"
+    return {
+        "merge_candidate_id": candidate_id,
+        "accepted": accepted,
+        "kept": accept_out.get("kept"),
+        "absorbed": accept_out.get("absorbed"),
+        "accept_status": accept_out.get("status"),
+        "accept_reason": accept_out.get("reason"),
     }
