@@ -200,16 +200,75 @@ def sync_all(
     contact_db: Path | None = None,
     since: str | None = None,
     dry_run: bool = False,
+    wrap_transaction: bool = True,
+    emit_log: bool = True,
+    backup_descriptor: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    import time as _time
+    from brain_agents.ingest_log import log_ingest_event
+    from brain_memory.structured import transaction
+
     art = artifacts_dir or (decoder_root / "artifacts")
     since_dt = _parse_ts(since) if since else None
-    out: dict[str, Any] = {"contacts": sync_contacts(decoder_root, contact_db=contact_db, dry_run=dry_run)}
-    out["chats"] = []
-    if not art.is_dir():
-        out["chats_error"] = f"artifacts_dir_missing:{art}"
+
+    def _do() -> dict[str, Any]:
+        out: dict[str, Any] = {"contacts": sync_contacts(decoder_root, contact_db=contact_db, dry_run=dry_run)}
+        out["chats"] = []
+        if not art.is_dir():
+            out["chats_error"] = f"artifacts_dir_missing:{art}"
+            return out
+        for chat_file in candidate_chat_json_files(art):
+            out["chats"].append(sync_chat_json(chat_file, dry_run=dry_run, since=since_dt))
         return out
-    for chat_file in candidate_chat_json_files(art):
-        out["chats"].append(sync_chat_json(chat_file, dry_run=dry_run, since=since_dt))
+
+    t0 = _time.monotonic()
+    try:
+        if not dry_run and wrap_transaction:
+            with transaction():
+                out = _do()
+        else:
+            out = _do()
+    except Exception as exc:
+        err = {"status": "error", "error": f"{exc.__class__.__name__}: {exc}"}
+        if emit_log:
+            log_ingest_event(
+                source="wechat",
+                mode="dry_run" if dry_run else "apply",
+                stats=err,
+                source_path=decoder_root,
+                elapsed_ms=(_time.monotonic() - t0) * 1000,
+                backup=backup_descriptor,
+            )
+        raise
+
+    # Aggregate stats across sub-calls for the log row.
+    contacts_stats = out.get("contacts", {}) or {}
+    chats = out.get("chats", []) or []
+    persons_created = int(contacts_stats.get("persons_created", 0) or 0) + sum(
+        int((c or {}).get("persons_created", 0) or 0) for c in chats
+    )
+    inserted = sum(int((c or {}).get("inserted", 0) or 0) for c in chats)
+    identifiers_added = int(contacts_stats.get("identifiers_added", 0) or 0)
+
+    agg = {
+        "status": "dry_run" if dry_run else "ok",
+        "persons_created": persons_created,
+        "inserted": inserted,
+        "identifiers_added": identifiers_added,
+        "chats_processed": len(chats),
+        "contact_db": contacts_stats.get("contact_db"),
+    }
+    elapsed_ms = (_time.monotonic() - t0) * 1000
+    if emit_log:
+        log_ingest_event(
+            source="wechat",
+            mode="dry_run" if dry_run else "apply",
+            stats=agg,
+            source_path=decoder_root,
+            elapsed_ms=elapsed_ms,
+            backup=backup_descriptor,
+        )
+    out["_agg"] = agg
     return out
 
 

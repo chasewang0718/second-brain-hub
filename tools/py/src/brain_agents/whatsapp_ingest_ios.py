@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from brain_agents.identity_resolver import ensure_person_with_seed, resolve_identifier
-from brain_memory.structured import execute, fetch_one
+from brain_agents.ingest_log import log_ingest_event
+from brain_memory.structured import execute, fetch_one, transaction
 
 
 def _cocoa_to_naive_utc(value: float | int | None) -> datetime | None:
@@ -55,6 +57,9 @@ def ingest_chatstorage_sqlite(
     *,
     dry_run: bool = False,
     limit: int | None = None,
+    wrap_transaction: bool = True,
+    emit_log: bool = True,
+    backup_descriptor: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     conn = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
@@ -118,51 +123,92 @@ def ingest_chatstorage_sqlite(
                     "preview": _brief(row["ztext"], row["zmessagetype"]),
                 }
             )
+        if emit_log:
+            log_ingest_event(
+                source="whatsapp_ios",
+                mode="dry_run",
+                stats=stats,
+                source_path=db_path,
+                backup=backup_descriptor,
+            )
         return stats
 
-    for row in rows:
-        z_pk = int(row["z_pk"])
-        source_id = f"wa_ios:{z_pk}"
-        exists = fetch_one(
-            "SELECT id FROM interactions WHERE source_kind = ? AND source_id = ?",
-            ["whatsapp_ios", source_id],
-        )
-        if exists:
-            stats["skipped_existing"] += 1
-            continue
+    def _apply() -> None:
+        for row in rows:
+            z_pk = int(row["z_pk"])
+            source_id = f"wa_ios:{z_pk}"
+            exists = fetch_one(
+                "SELECT id FROM interactions WHERE source_kind = ? AND source_id = ?",
+                ["whatsapp_ios", source_id],
+            )
+            if exists:
+                stats["skipped_existing"] += 1
+                continue
 
-        is_me = int(row["zisfromme"] or 0)
-        peer = _pick_peer_jid(is_from_me=is_me, zfrom=row["zfrom"], zto=row["zto"])
-        push = str(row["zpush"] or "").strip()
+            is_me = int(row["zisfromme"] or 0)
+            peer = _pick_peer_jid(is_from_me=is_me, zfrom=row["zfrom"], zto=row["zto"])
+            push = str(row["zpush"] or "").strip()
 
-        person_id: str | None = None
-        if peer:
-            person_id = resolve_identifier("wa_jid", peer)
-            if person_id is None:
-                label = push or peer.split("@", 1)[0]
-                person_id = ensure_person_with_seed(
-                    label,
-                    seed_identifiers=[("wa_jid", peer)],
-                    source_kind="whatsapp_ios",
-                )
-                stats["persons_created"] += 1
+            person_id: str | None = None
+            if peer:
+                person_id = resolve_identifier("wa_jid", peer)
+                if person_id is None:
+                    label = push or peer.split("@", 1)[0]
+                    person_id = ensure_person_with_seed(
+                        label,
+                        seed_identifiers=[("wa_jid", peer)],
+                        source_kind="whatsapp_ios",
+                    )
+                    stats["persons_created"] += 1
+            else:
+                stats["messages_without_peer"] += 1
+
+            ts = _cocoa_to_naive_utc(row["zmessagedate"]) or datetime.now(timezone.utc).replace(tzinfo=None)
+            summary = _brief(row["ztext"], row["zmessagetype"])
+            detail_obj = {k: row[k] for k in row.keys()}
+            detail = json.dumps(detail_obj, ensure_ascii=False, default=str)[:8000]
+
+            execute(
+                """
+                INSERT INTO interactions
+                  (id, person_id, ts_utc, channel, summary, source_path, detail_json, source_kind, source_id)
+                VALUES
+                  (nextval('interactions_id_seq'), ?, ?, 'whatsapp', ?, ?, ?, 'whatsapp_ios', ?)
+                """,
+                [person_id, ts, summary, str(db_path), detail, source_id],
+            )
+            stats["inserted"] += 1
+
+    t0 = time.monotonic()
+    try:
+        if wrap_transaction:
+            with transaction():
+                _apply()
         else:
-            stats["messages_without_peer"] += 1
+            _apply()
+    except Exception as exc:
+        stats["status"] = "error"
+        stats["error"] = f"{exc.__class__.__name__}: {exc}"
+        if emit_log:
+            log_ingest_event(
+                source="whatsapp_ios",
+                mode="apply",
+                stats=stats,
+                source_path=db_path,
+                elapsed_ms=(time.monotonic() - t0) * 1000,
+                backup=backup_descriptor,
+            )
+        raise
 
-        ts = _cocoa_to_naive_utc(row["zmessagedate"]) or datetime.now(timezone.utc).replace(tzinfo=None)
-        summary = _brief(row["ztext"], row["zmessagetype"])
-        detail_obj = {k: row[k] for k in row.keys()}
-        detail = json.dumps(detail_obj, ensure_ascii=False, default=str)[:8000]
-
-        execute(
-            """
-            INSERT INTO interactions
-              (id, person_id, ts_utc, channel, summary, source_path, detail_json, source_kind, source_id)
-            VALUES
-              (nextval('interactions_id_seq'), ?, ?, 'whatsapp', ?, ?, ?, 'whatsapp_ios', ?)
-            """,
-            [person_id, ts, summary, str(db_path), detail, source_id],
+    elapsed_ms = (time.monotonic() - t0) * 1000
+    stats["elapsed_ms"] = round(elapsed_ms, 1)
+    if emit_log:
+        log_ingest_event(
+            source="whatsapp_ios",
+            mode="apply",
+            stats=stats,
+            source_path=db_path,
+            elapsed_ms=elapsed_ms,
+            backup=backup_descriptor,
         )
-        stats["inserted"] += 1
-
     return stats

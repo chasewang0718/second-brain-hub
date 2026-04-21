@@ -682,6 +682,35 @@ def whatsapp_ingest_ios_cmd(
     typer.echo(json.dumps(ingest_chatstorage_sqlite(p, dry_run=dry_run, limit=lim), ensure_ascii=False, indent=2, default=str))
 
 
+@app.command("ingest-backup-now")
+def ingest_backup_now_cmd(
+    label: str = typer.Option("manual", "--label", help="Short label appended to the snapshot filename"),
+) -> None:
+    """B-ING-0 · Snapshot brain-telemetry.duckdb before a real ingest.
+
+    Copies the live DuckDB file to _backup/telemetry/<ts>-<label>.duckdb
+    with an sha256 sidecar and an append-only pointer-log.jsonl index.
+    Always run this before the FIRST apply of a new source.
+    """
+    from brain_agents.ingest_backup import snapshot_duckdb
+
+    out = snapshot_duckdb(label=label)
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
+@app.command("ingest-log-recent")
+def ingest_log_recent_cmd(
+    days: int = typer.Option(7, "--days", min=1, max=90),
+    source: str = typer.Option("", "--source", help="Filter: ios_addressbook | whatsapp_ios | wechat"),
+    limit: int = typer.Option(50, "--limit", min=1, max=1000),
+) -> None:
+    """B-ING-0 · Tail the structured ingest event log (JSONL)."""
+    from brain_agents.ingest_log import list_recent_events
+
+    rows = list_recent_events(days=days, source=source or None, limit=limit)
+    typer.echo(json.dumps({"count": len(rows), "events": rows}, ensure_ascii=False, indent=2, default=str))
+
+
 @cloud_app.command("flush")
 def cloud_flush_cmd(
     dry_run: bool = typer.Option(False, "--dry-run", help="Print plan without spawning cursor-agent"),

@@ -277,25 +277,79 @@ def ensure_schema() -> None:
         conn.close()
 
 
-def query(sql: str, params: list[Any] | None = None) -> list[dict[str, Any]]:
+import contextlib
+import threading
+
+# Thread-local "active connection". When set, execute/query/fetch_one
+# reuse it instead of opening+closing a fresh one per call. The
+# ``transaction`` context manager is the only thing that should set
+# this — nested use is not supported (raises).
+_tx_state = threading.local()
+
+
+def _active_conn() -> Any | None:
+    return getattr(_tx_state, "conn", None)
+
+
+@contextlib.contextmanager
+def transaction() -> Any:
+    """Open a persistent DuckDB connection and wrap all inner
+    ``execute`` / ``query`` / ``fetch_one`` calls inside
+    ``BEGIN`` / ``COMMIT`` (or ``ROLLBACK`` on exception).
+
+    Used by real-ingest apply paths (B-ING-0) so that a partial
+    failure in a multi-row insert never leaves DuckDB in a mixed
+    state. Nested transactions are not supported.
+    """
+    if _active_conn() is not None:
+        raise RuntimeError("nested transaction not supported")
     ensure_schema()
     conn = _connect()
+    _tx_state.conn = conn
+    conn.execute("BEGIN")
+    try:
+        yield conn
+    except BaseException:
+        try:
+            conn.execute("ROLLBACK")
+        finally:
+            _tx_state.conn = None
+            conn.close()
+        raise
+    conn.execute("COMMIT")
+    _tx_state.conn = None
+    conn.close()
+
+
+def query(sql: str, params: list[Any] | None = None) -> list[dict[str, Any]]:
+    conn = _active_conn()
+    close_after = False
+    if conn is None:
+        ensure_schema()
+        conn = _connect()
+        close_after = True
     try:
         cursor = conn.execute(sql, params or [])
         columns = [item[0] for item in cursor.description or []]
         rows = cursor.fetchall()
         return [{columns[i]: row[i] for i in range(len(columns))} for row in rows]
     finally:
-        conn.close()
+        if close_after:
+            conn.close()
 
 
 def execute(sql: str, params: list[Any] | None = None) -> None:
-    ensure_schema()
-    conn = _connect()
+    conn = _active_conn()
+    close_after = False
+    if conn is None:
+        ensure_schema()
+        conn = _connect()
+        close_after = True
     try:
         conn.execute(sql, params or [])
     finally:
-        conn.close()
+        if close_after:
+            conn.close()
 
 
 def fetch_one(sql: str, params: list[Any] | None = None) -> dict[str, Any] | None:

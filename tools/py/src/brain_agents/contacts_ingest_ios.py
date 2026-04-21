@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
 from brain_agents.identity_resolver import ensure_person_with_seed, register_identifier, resolve_identifier
+from brain_agents.ingest_log import log_ingest_event
+from brain_memory.structured import transaction
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -23,7 +26,14 @@ def _compose_name(first: str, last: str, org: str) -> str:
     return core or org.strip() or "unknown"
 
 
-def ingest_address_book_sqlite(db_path: Path, *, dry_run: bool = False) -> dict[str, Any]:
+def ingest_address_book_sqlite(
+    db_path: Path,
+    *,
+    dry_run: bool = False,
+    wrap_transaction: bool = True,
+    emit_log: bool = True,
+    backup_descriptor: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     conn = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
@@ -88,37 +98,79 @@ def ingest_address_book_sqlite(db_path: Path, *, dry_run: bool = False) -> dict[
             }
             for p in persons[:20]
         ]
+        if emit_log:
+            log_ingest_event(
+                source="ios_addressbook",
+                mode="dry_run",
+                stats=stats,
+                source_path=db_path,
+                backup=backup_descriptor,
+            )
         return stats
 
-    for p in persons:
-        rid = int(p["rid"])
-        label = _compose_name(
-            str(p["First"] or ""),
-            str(p["Last"] or ""),
-            str(p["Organization"] or ""),
-        )
-        stable = f"ios_ab:{rid}"
-        pid = resolve_identifier("ios_contact_row", stable)
-        phones = by_rid.get(rid, {}).get("phones", [])
-        emails = by_rid.get(rid, {}).get("emails", [])
-        seed: list[tuple[str, str]] = [("ios_contact_row", stable)]
-        if pid is None:
-            pid = ensure_person_with_seed(
-                label,
-                seed_identifiers=seed,
-                source_kind="ios_addressbook",
+    def _apply() -> None:
+        for p in persons:
+            rid = int(p["rid"])
+            label = _compose_name(
+                str(p["First"] or ""),
+                str(p["Last"] or ""),
+                str(p["Organization"] or ""),
             )
-            stats["persons_created"] += 1
+            stable = f"ios_ab:{rid}"
+            pid = resolve_identifier("ios_contact_row", stable)
+            phones = by_rid.get(rid, {}).get("phones", [])
+            emails = by_rid.get(rid, {}).get("emails", [])
+            seed: list[tuple[str, str]] = [("ios_contact_row", stable)]
+            if pid is None:
+                pid = ensure_person_with_seed(
+                    label,
+                    seed_identifiers=seed,
+                    source_kind="ios_addressbook",
+                )
+                stats["persons_created"] += 1
+            else:
+                register_identifier(pid, "ios_contact_row", stable, source_kind="ios_addressbook")
+
+            for ph in phones:
+                r = register_identifier(pid, "phone", ph, source_kind="ios_addressbook")
+                if r.get("status") == "ok":
+                    stats["identifiers_added"] += 1
+            for em in emails:
+                r = register_identifier(pid, "email", em, source_kind="ios_addressbook")
+                if r.get("status") == "ok":
+                    stats["identifiers_added"] += 1
+
+    t0 = time.monotonic()
+    try:
+        if wrap_transaction:
+            with transaction():
+                _apply()
         else:
-            register_identifier(pid, "ios_contact_row", stable, source_kind="ios_addressbook")
+            _apply()
+    except Exception as exc:
+        stats["status"] = "error"
+        stats["error"] = f"{exc.__class__.__name__}: {exc}"
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        if emit_log:
+            log_ingest_event(
+                source="ios_addressbook",
+                mode="apply",
+                stats=stats,
+                source_path=db_path,
+                elapsed_ms=elapsed_ms,
+                backup=backup_descriptor,
+            )
+        raise
 
-        for ph in phones:
-            r = register_identifier(pid, "phone", ph, source_kind="ios_addressbook")
-            if r.get("status") == "ok":
-                stats["identifiers_added"] += 1
-        for em in emails:
-            r = register_identifier(pid, "email", em, source_kind="ios_addressbook")
-            if r.get("status") == "ok":
-                stats["identifiers_added"] += 1
-
+    elapsed_ms = (time.monotonic() - t0) * 1000
+    stats["elapsed_ms"] = round(elapsed_ms, 1)
+    if emit_log:
+        log_ingest_event(
+            source="ios_addressbook",
+            mode="apply",
+            stats=stats,
+            source_path=db_path,
+            elapsed_ms=elapsed_ms,
+            backup=backup_descriptor,
+        )
     return stats
