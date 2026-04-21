@@ -484,6 +484,7 @@ Monica/Dex 式人际关系助手.
 | 2026-04-21 | — | **附录**: 人际 CRM 多源栈（persons / identifiers / interactions / cloud_queue）与相关 `brain` 子命令写入路线图；runbook `architecture/ios-backup-runbook.md`。 |
 | 2026-04-21 | — | **CRM / identity**: 中国大陆手机号归一化为 `86` + 合法号段（避免把 NANP `1…` 误判为 CN）；存量 `person_identifiers` 用 `brain identifiers-repair [--dry-run]` 重写并按冲突写入 `merge_candidates`（T3）。CLI 约定：子命令 stdout 仅输出可解析文本/JSON（Shell Profile 若在 Python 启动前打印横幅，与本仓库无关）。 |
 | 2026-04-21 | — | **CRM CLI**: `overdue --channel`、`context-for-meeting --since-days/--format md`、`merge-candidates list|accept|reject`。 |
+| 2026-04-21 | — | **Tests / runbook**: pytest 化（`tools/py/tests/`），`smoke_people`/`test_identity_phone_normalize`/`test_merge_candidates`/`test_people_cli` 共 22 用例；新增 `cloud flush` runbook `architecture/cloud-flush-runbook.md`。 |
 
 ---
 

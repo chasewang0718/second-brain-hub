@@ -24,6 +24,18 @@ dependencies = [
 second-brain-hub-py = "second_brain_hub_py:main"
 brain = "brain_cli.main:main"
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+]
+
 [build-system]
 requires = ["uv_build>=0.11.7,<0.12.0"]
 build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-q"
+testpaths = ["tests"]
+pythonpath = ["src"]
+python_files = ["test_*.py", "smoke_*.py"]

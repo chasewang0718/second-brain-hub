@@ -2,34 +2,27 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-_REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_REPO / "src"))
-
 from brain_agents.identity_resolver import normalize_phone_digits
 
 
-def assert_eq(a: str, b: str, label: str) -> None:
-    assert a == b, f"{label}: expected {b!r}, got {a!r}"
+def test_domestic_11_digit_gets_86_prefix() -> None:
+    assert normalize_phone_digits("13800138000") == "8613800138000"
 
 
-def main() -> int:
-    # CN national 11-digit → E.164 CN
-    assert_eq(normalize_phone_digits("13800138000"), "8613800138000", "domestic 11")
-    assert_eq(normalize_phone_digits("+86 138 0013 8000"), "8613800138000", "+86 spaced")
-    assert_eq(normalize_phone_digits("0086 138 0013 8000"), "8613800138000", "0086 prefix")
-
-    # NANP: must not gain a fake 86 prefix (strict CN regex excludes 141… patterns)
-    assert_eq(normalize_phone_digits("+1 415 555 0123"), "14155550123", "US NANP")
-
-    # Already canonical CN E.164
-    assert_eq(normalize_phone_digits("8613800138000"), "8613800138000", "already 86")
-
-    print("test_identity_phone_normalize_ok")
-    return 0
+def test_plus86_spaced_variants_normalize() -> None:
+    assert normalize_phone_digits("+86 138 0013 8000") == "8613800138000"
+    assert normalize_phone_digits("0086 138 0013 8000") == "8613800138000"
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+def test_already_canonical_china_preserved() -> None:
+    assert normalize_phone_digits("8613800138000") == "8613800138000"
+
+
+def test_nanp_us_not_misclassified_as_cn() -> None:
+    # Strict CN mobile regex excludes 141… — US numbers must not gain a fake 86 prefix.
+    assert normalize_phone_digits("+1 415 555 0123") == "14155550123"
+
+
+def test_empty_and_garbage_safe() -> None:
+    assert normalize_phone_digits("") == ""
+    assert normalize_phone_digits("not-a-number") == ""
