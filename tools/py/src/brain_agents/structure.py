@@ -28,9 +28,36 @@ class Suggestion:
     target: str
     reason: str
     score: float
+    hint: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {"kind": self.kind, "target": self.target, "reason": self.reason, "score": round(self.score, 2)}
+        data = {"kind": self.kind, "target": self.target, "reason": self.reason, "score": round(self.score, 2)}
+        if self.hint:
+            data["hint"] = self.hint
+        return data
+
+
+def _density_hint(directory: Path) -> str:
+    child_counts: dict[str, int] = {}
+    for path in directory.rglob("*.md"):
+        rel = path.relative_to(directory)
+        head = rel.parts[0] if rel.parts else "_root"
+        child_counts[head] = child_counts.get(head, 0) + 1
+    top_children = sorted(child_counts.items(), key=lambda x: x[1], reverse=True)
+    if len(top_children) >= 2:
+        parts = ", ".join(f"{name}:{count}" for name, count in top_children[:3])
+        return f"split by top child folders first ({parts})"
+
+    # If content is mostly flat, suggest splitting by modified month slices.
+    month_counts: dict[str, int] = {}
+    for path in directory.rglob("*.md"):
+        month = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).strftime("%Y-%m")
+        month_counts[month] = month_counts.get(month, 0) + 1
+    top_months = sorted(month_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+    if top_months:
+        parts = ", ".join(f"{month}:{count}" for month, count in top_months)
+        return f"consider mtime slices or archive split ({parts})"
+    return "consider splitting by topic tags extracted from filenames"
 
 
 def _directory_stats() -> list[tuple[Path, int, float]]:
@@ -59,6 +86,7 @@ def detect_structure_candidates() -> list[dict[str, Any]]:
                     target=rel,
                     reason=f"{count} markdown files exceed density threshold",
                     score=min(1.0, count / 80.0),
+                    hint=_density_hint(directory),
                 )
             )
         if count < 3 and stale_days > 90:
@@ -103,6 +131,7 @@ def structure_history(dry_run: bool = True) -> dict[str, Any]:
                 f"## {idx}. {row['kind']} · {row['target']}",
                 f"- score: {row['score']}",
                 f"- reason: {row['reason']}",
+                f"- hint: {row.get('hint', 'n/a')}",
                 "",
             ]
         )
