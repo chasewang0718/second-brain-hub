@@ -3,6 +3,8 @@ telemetry/logs/*.jsonl
 telemetry/logs/*.log
 telemetry/logs/*.duckdb
 telemetry/*.duckdb
+**/brain-telemetry.duckdb
+**/_runtime/logs/*.duckdb
 telemetry/*.kuzu
 telemetry/kuzu-memory/
 telemetry/vector-index/

@@ -12,6 +12,11 @@ from brain_core.config import load_paths_config, load_runtime_config
 
 app = typer.Typer(help="second-brain-hub Python CLI")
 
+cloud_app = typer.Typer(help="Cloud offload queue (manual brain cloud flush)")
+queue_app = typer.Typer(help="Inspect pending cloud_queue rows")
+cloud_app.add_typer(queue_app, name="queue")
+app.add_typer(cloud_app, name="cloud")
+
 
 def _ensure_utf8_stdout() -> None:
     if hasattr(sys.stdout, "reconfigure"):
@@ -240,10 +245,26 @@ def text_inbox_ingest_cmd(input_file: str = typer.Argument(..., help="Path to so
 
 
 @app.command("pdf-inbox-ingest")
-def pdf_inbox_ingest_cmd(limit: int = typer.Option(1, min=1, max=100, help="How many PDF files to process")) -> None:
-    from brain_agents.file_inbox import ingest_pdf_inbox
+def pdf_inbox_ingest_cmd(
+    limit: int = typer.Option(1, min=1, max=100, help="How many PDF files to process"),
+    paths: list[str] = typer.Option(
+        None,
+        "--path",
+        "-p",
+        help="Explicit PDF path to ingest (repeatable). External files are copied into pdf_inbox_dir before processing.",
+    ),
+    no_copy: bool = typer.Option(
+        False,
+        "--no-copy",
+        help="When using --path, process the file in place instead of copying it into pdf_inbox_dir.",
+    ),
+) -> None:
+    from brain_agents.file_inbox import ingest_pdf_inbox, ingest_pdf_paths
 
-    result = ingest_pdf_inbox(limit=limit)
+    if paths:
+        result = ingest_pdf_paths(paths, copy_into_inbox=not no_copy)
+    else:
+        result = ingest_pdf_inbox(limit=limit)
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
@@ -325,6 +346,143 @@ def weekly_review_cmd() -> None:
     from brain_agents.digest import generate_weekly_review
 
     typer.echo(json.dumps(generate_weekly_review(), ensure_ascii=False, indent=2))
+
+
+@queue_app.command("list")
+def cloud_queue_list_cmd(limit: int = typer.Option(50, min=1, max=500)) -> None:
+    from brain_agents.cloud_queue import list_pending
+
+    typer.echo(json.dumps(list_pending(limit=limit), ensure_ascii=False, indent=2, default=str))
+
+
+@queue_app.command("show")
+def cloud_queue_show_cmd(queue_id: int = typer.Argument(..., help="cloud_queue.id")) -> None:
+    from brain_agents.cloud_queue import show
+
+    row = show(queue_id)
+    typer.echo(json.dumps(row or {}, ensure_ascii=False, indent=2, default=str))
+
+
+@queue_app.command("drop")
+def cloud_queue_drop_cmd(queue_id: int = typer.Argument(..., help="cloud_queue.id")) -> None:
+    from brain_agents.cloud_queue import drop
+
+    typer.echo(json.dumps(drop(queue_id), ensure_ascii=False, indent=2))
+
+
+@app.command("wechat-sync")
+def wechat_sync_cmd(
+    decoder_dir: str = typer.Option(
+        r"C:\dev-projects\wechat-decoder",
+        "--decoder-dir",
+        help="Root of wechat-decoder (expects artifacts/chat_*.json; searches for contact SQLite)",
+    ),
+    contact_db: str = typer.Option(
+        "",
+        "--contact-db",
+        help="Optional explicit path to decrypted SQLite with `contact` table",
+    ),
+    since: str = typer.Option(
+        "",
+        "--since",
+        help="Only import chat messages with ts >= this ISO-8601 timestamp",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Plan only; no DuckDB writes"),
+) -> None:
+    from brain_agents.wechat_sync import sync_from_cli
+
+    typer.echo(
+        json.dumps(
+            sync_from_cli(decoder_dir, contact_db=contact_db, since=since, dry_run=dry_run),
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+    )
+
+
+@app.command("backup-ios-locate")
+def backup_ios_locate_cmd(
+    backup_root: str = typer.Option(
+        "",
+        "--backup-root",
+        help="Optional explicit iPhone backup UDID folder (contains Manifest.db)",
+    ),
+) -> None:
+    from pathlib import Path
+
+    from brain_agents.ios_backup_locator import locate_bundle
+
+    parent = Path(backup_root).resolve() if backup_root.strip() else None
+    typer.echo(
+        json.dumps(
+            locate_bundle(backup_udid_dir=parent),
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+    )
+
+
+@app.command("contacts-ingest-ios")
+def contacts_ingest_ios_cmd(
+    db_path: str = typer.Option("", "--db", help="AddressBook.sqlitedb (auto-locate when omitted)"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+) -> None:
+    from pathlib import Path
+
+    from brain_agents.contacts_ingest_ios import ingest_address_book_sqlite
+    from brain_agents.ios_backup_locator import find_addressbook_sqlitedb
+
+    p = Path(db_path) if db_path.strip() else None
+    if p is None or not p.is_file():
+        hit = find_addressbook_sqlitedb()
+        sel = hit.get("selected")
+        if not sel:
+            typer.echo(json.dumps({"status": "error", "reason": "missing_db", "hint": hit}, ensure_ascii=False, indent=2))
+            raise typer.Exit(code=1)
+        p = Path(sel)
+    typer.echo(json.dumps(ingest_address_book_sqlite(p, dry_run=dry_run), ensure_ascii=False, indent=2, default=str))
+
+
+@app.command("whatsapp-ingest-ios")
+def whatsapp_ingest_ios_cmd(
+    db_path: str = typer.Option("", "--db", help="ChatStorage.sqlite (auto-locate when omitted)"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    limit: int = typer.Option(0, "--limit", min=0, help="Max messages to import (0 = all)"),
+) -> None:
+    from pathlib import Path
+
+    from brain_agents.ios_backup_locator import find_chatstorage_sqlite
+    from brain_agents.whatsapp_ingest_ios import ingest_chatstorage_sqlite
+
+    p = Path(db_path) if db_path.strip() else None
+    if p is None or not p.is_file():
+        hit = find_chatstorage_sqlite()
+        sel = hit.get("selected")
+        if not sel:
+            typer.echo(json.dumps({"status": "error", "reason": "missing_db", "hint": hit}, ensure_ascii=False, indent=2))
+            raise typer.Exit(code=1)
+        p = Path(sel)
+    lim = None if limit <= 0 else limit
+    typer.echo(json.dumps(ingest_chatstorage_sqlite(p, dry_run=dry_run, limit=lim), ensure_ascii=False, indent=2, default=str))
+
+
+@cloud_app.command("flush")
+def cloud_flush_cmd(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print plan without spawning cursor-agent"),
+    agent_cmd: str = typer.Option("", "--agent-cmd", help="Override path to cursor-agent/agent.cmd"),
+) -> None:
+    from brain_agents.cloud_flush import flush
+
+    typer.echo(
+        json.dumps(
+            flush(dry_run=dry_run, agent_cmd=agent_cmd or None),
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+    )
 
 
 def main() -> None:

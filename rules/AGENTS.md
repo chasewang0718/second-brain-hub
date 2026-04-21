@@ -476,6 +476,13 @@ Chase 每天 2+ 次通过 `CapsLock + D` 把剪贴板丢进 `99-inbox/`（文件
 
 ### 10. 人际关系管理协议（预览，Phase 2 正式启用）
 
+#### 与 hub 结构化 CRM 的关系（2026-04-21）
+
+- **查询入口**：`brain who` / `brain overdue` / `brain context-for-meeting`（MCP 同源）读 DuckDB（`brain-telemetry.duckdb`）；不是只看 `06-people/` markdown。
+- **数据源**：微信 `brain wechat-sync`，iPhone 未加密备份 `brain backup-ios-locate` → `contacts-ingest-ios` / `whatsapp-ingest-ios`，Caps+D 文本走 `brain text-inbox-ingest`（归档后可写 `linked_person`、`person_notes`、`[people-note: …]`）。
+- **兜底队列**：本地模型吃不下的条目入 `brain cloud queue …`，人用 `brain cloud flush`（见 `architecture/ROADMAP.md` 附录）。
+- **Markdown**：`06-people/` 仍是叙事与指针卡；与 DuckDB **互补**，合并以标识符解析为准。
+
 当 Chase 粘入对话内容 / 会议摘要 / 与某人互动记录时，走**人际提炼流水线**（5-pass 全跑）：
 
 #### 输入类型

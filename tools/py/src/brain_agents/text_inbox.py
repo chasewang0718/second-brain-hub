@@ -263,4 +263,9 @@ def ingest_file(input_path: str) -> dict[str, Any]:
         pii_hits=[],
         status="archived",
     )
-    return result.to_dict()
+    data = result.to_dict()
+    if result.status == "archived":
+        from brain_agents.inbox_people import apply_people_postprocess
+
+        data["people"] = apply_people_postprocess(Path(result.target_path), text)
+    return data

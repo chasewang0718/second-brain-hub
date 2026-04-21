@@ -2,7 +2,7 @@
 title: second-brain-hub 优化路线图
 status: active
 created: 2026-04-20
-updated: 2026-04-20
+updated: 2026-04-21
 authoritative_at: C:\dev-projects\second-brain-hub\architecture\ROADMAP.md
 ---
 
@@ -392,6 +392,22 @@ Monica/Dex 式人际关系助手.
 
 ---
 
+## 附录 · 人际 CRM 数据面 (hub 已落盘, 2026-04-21)
+
+与 Phase A5 目标对齐的**结构化层**已在 DuckDB 打通（路径见 `config/paths.yaml` → `telemetry_logs_dir` → `brain-telemetry.duckdb`），用于多通道身份合并（微信 / Caps+D / iOS 通讯录 / WhatsApp 备份）与手动云队列兜底。
+
+| 能力 | CLI / 入口 |
+|---|---|
+| 查询联系人 / 逾期 / 会前上下文 | `brain who`, `brain overdue`, `brain context-for-meeting` |
+| 微信 decoder 导入 | `brain wechat-sync [--dry-run]` |
+| iPhone 备份定位 / 通讯录 / WhatsApp | `brain backup-ios-locate`, `brain contacts-ingest-ios`, `brain whatsapp-ingest-ios`（参见 `architecture/ios-backup-runbook.md`） |
+| 本地模型做不了的条目 | `brain cloud queue list` → `brain cloud flush`（写锁 + cursor-agent；日志在 Tier A 根 `.brain-cloud-flush-last.log`） |
+| Caps+D 文本 inbox | `brain text-inbox-ingest`；归档后自动跑实体抽取 + `[people-note: 姓名]` → `person_notes` / `cloud_queue` |
+
+**不做的事情**: 自动 Web 搜索补全联系人；WhatsApp Win11 商店版本地 DB 解密（推荐 iPhone 未加密备份路径）。
+
+---
+
 ## 4. 时间估算
 
 | 层 | Phase | 工时 |
@@ -464,6 +480,7 @@ Monica/Dex 式人际关系助手.
 | 2026-04-20 | v3 | 加 Phase 2.5 任务派发器 (规则驱动, not-started) |
 | 2026-04-20 | v4 | 重大转向: 放弃"AI 守原则"范式, 改为"AI 全自主 + git 兜底". Python + LangGraph + MCP 栈. 五大终端目标明确. LangGraph 从 Cut 到采纳 |
 | 2026-04-20 | **v5** | **零预算 + 改名 + Python 唯一**. 云端兜底改为 `_cursor_queue/` 人工触发 Cursor 订阅处理. LoRA 砍掉 (0 预算). DuckDB 确定为结构化 DB (否决 Supabase). 目录改名 `D:\brain` → `D:\second-brain-content`, `D:\brain-assets` → `D:\second-brain-assets` (Phase F0 一次性). 老 PS 代码 A3 时整体删除. 原则降级为偏好. TypeScript 栈经评估拒绝. |
+| 2026-04-21 | — | **附录**: 人际 CRM 多源栈（persons / identifiers / interactions / cloud_queue）与相关 `brain` 子命令写入路线图；runbook `architecture/ios-backup-runbook.md`。 |
 
 ---
 
