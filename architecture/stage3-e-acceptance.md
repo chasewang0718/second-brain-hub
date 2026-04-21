@@ -60,3 +60,4 @@
 |------|------|
 | 2026-04-21 | 首版（E 文档化闭环） |
 | 2026-04-21 | 本轮 agent：B/C 回归数据、D1/D3 初样报告链入；E 全开仍待 A2b + D 扩样 |
+| 2026-04-21 | Caps+D 统一入口：AHK + PowerShell `gsave` 增加「文件拖放列表」分支 → 选中 PDF 时自动走 `brain pdf-inbox-ingest --path ...`（见 journal `§ caps-d-file-branch`）；新增 `ingest_pdf_paths` + `--path/-p` CLI 参数。文本分支完全不变。 |

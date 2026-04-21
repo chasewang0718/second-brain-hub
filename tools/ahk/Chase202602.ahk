@@ -55,22 +55,24 @@ CapsLock & d::
     savedClip := ClipboardAll()
     A_Clipboard := ""
     Send "^c"
-    copiedOk := ClipWait(0.5)
+    ; 2026-04-21: 第二参数 1 = 等待任意剪贴板格式 (文本 或 文件拖放列表 CF_HDROP).
+    ; 让选中文件时 (Explorer / Finder-like UI) 也能被 gsave 的新文件分支捕获.
+    copiedOk := ClipWait(0.8, 1)
     if (copiedOk) {
-        LogGsave("selection copied len=" . StrLen(A_Clipboard))
+        LogGsave("clipboard captured (text_len=" . StrLen(A_Clipboard) . ")")
     } else {
         A_Clipboard := savedClip
-        LogGsave("fallback clipboard len=" . StrLen(A_Clipboard))
+        LogGsave("copy timed out; restored prior clipboard (len=" . StrLen(A_Clipboard) . ")")
     }
-    if (StrLen(A_Clipboard) = 0) {
-        LogGsave("empty clipboard, exit")
-        TrayTip "second-brain", "Nothing to save (empty)", 0x2
-        SetTimer () => TrayTip(), -3000
-        return
+    textLen := StrLen(A_Clipboard)
+    if (textLen > 0) {
+        preview := SubStr(A_Clipboard, 1, 80)
+        if (textLen > 80)
+            preview .= "..."
+    } else {
+        preview := "[files or empty]  (gsave 会自动判断)"
     }
-    preview := SubStr(A_Clipboard, 1, 80)
-    if (StrLen(A_Clipboard) > 80)
-        preview .= "..."
+    ; gsave 在新版里自己处理: 先试文件拖放列表 -> PDF 入 inbox; 否则走文本路径.
     exitCode := RunWait('powershell.exe -NoLogo -Command "gsave"', , "Hide")
     LogGsave("powershell exit=" . exitCode)
     TrayTip "second-brain inbox", preview, 0x1

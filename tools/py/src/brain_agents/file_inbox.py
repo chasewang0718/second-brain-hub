@@ -3,12 +3,35 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import shutil
 from dataclasses import dataclass
 from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 
 from brain_core.config import load_paths_config
+
+
+def _brain_exclude_patterns() -> list[str]:
+    home = Path.home() / ".brain-exclude.txt"
+    if not home.exists():
+        return []
+    out: list[str] = []
+    for line in home.read_text(encoding="utf-8", errors="ignore").splitlines():
+        item = line.strip()
+        if item and not item.startswith("#"):
+            out.append(item.lower())
+    return out
+
+
+def _is_excluded(pdf_path: Path) -> str:
+    patterns = _brain_exclude_patterns()
+    p = str(pdf_path).lower()
+    for pat in patterns:
+        if pat in p:
+            return pat
+    return ""
 
 
 def _paths() -> dict[str, str]:
@@ -131,18 +154,95 @@ def _build_pointer_card(pdf_path: Path) -> str:
     )
 
 
+def _copy_into_inbox(pdf_path: Path) -> Path:
+    """If pdf_path is outside pdf_inbox_dir, copy it in with a collision-safe name."""
+    inbox = _pdf_inbox_dir()
+    inbox.mkdir(parents=True, exist_ok=True)
+    try:
+        resolved_src = pdf_path.resolve()
+        resolved_inbox = inbox.resolve()
+    except OSError:
+        resolved_src = pdf_path
+        resolved_inbox = inbox
+    try:
+        inside = str(resolved_src).lower().startswith(str(resolved_inbox).lower() + os.sep.lower())
+    except Exception:
+        inside = False
+    if inside:
+        return resolved_src
+    target = inbox / pdf_path.name
+    if target.exists():
+        stem = pdf_path.stem
+        suffix = pdf_path.suffix
+        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+        target = inbox / f"{stem}-{stamp}{suffix}"
+    shutil.copy2(pdf_path, target)
+    return target
+
+
 def ingest_pdf(pdf_path: Path) -> dict[str, Any]:
     try:
         if not pdf_path.exists():
             return PdfIngestResult(str(pdf_path), "", "skipped", "missing").to_dict()
         if pdf_path.suffix.lower() != ".pdf":
             return PdfIngestResult(str(pdf_path), "", "skipped", "not_pdf").to_dict()
+        pattern = _is_excluded(pdf_path)
+        if pattern:
+            return PdfIngestResult(
+                str(pdf_path), "", "skipped", f"blacklist:{pattern}"
+            ).to_dict()
         pointer = _pointer_card_path(pdf_path)
         pointer.write_text(_build_pointer_card(pdf_path), encoding="utf-8")
         return PdfIngestResult(str(pdf_path), str(pointer), "ok").to_dict()
     except Exception as exc:
         task_path = _write_cursor_queue_task(pdf_path, str(exc))
         return PdfIngestResult(str(pdf_path), str(task_path), "queued", str(exc)).to_dict()
+
+
+def ingest_pdf_paths(paths: list[str | Path], copy_into_inbox: bool = True) -> list[dict[str, Any]]:
+    """Ingest an explicit list of PDF paths.
+
+    When copy_into_inbox is True, a file that lives outside pdf_inbox_dir is first
+    copied into it so the original tree stays untouched. The pointer card is then
+    generated against the in-inbox copy.
+    """
+    results: list[dict[str, Any]] = []
+    for raw in paths:
+        try:
+            src = Path(raw).expanduser()
+        except Exception as exc:
+            results.append(
+                PdfIngestResult(str(raw), "", "skipped", f"bad_path:{exc}").to_dict()
+            )
+            continue
+        if src.suffix.lower() != ".pdf":
+            results.append(
+                PdfIngestResult(str(src), "", "skipped", "not_pdf").to_dict()
+            )
+            continue
+        if not src.exists():
+            results.append(
+                PdfIngestResult(str(src), "", "skipped", "missing").to_dict()
+            )
+            continue
+        pattern = _is_excluded(src)
+        if pattern:
+            results.append(
+                PdfIngestResult(str(src), "", "skipped", f"blacklist:{pattern}").to_dict()
+            )
+            continue
+        try:
+            target = _copy_into_inbox(src) if copy_into_inbox else src
+        except Exception as exc:
+            results.append(
+                PdfIngestResult(str(src), "", "skipped", f"copy_failed:{exc}").to_dict()
+            )
+            continue
+        result = ingest_pdf(target)
+        result["source_path"] = str(src)
+        result["inbox_path"] = str(target)
+        results.append(result)
+    return results
 
 
 def ingest_pdf_inbox(limit: int = 1) -> list[dict[str, Any]]:
