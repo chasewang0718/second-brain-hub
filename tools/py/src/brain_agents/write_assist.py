@@ -10,10 +10,88 @@ import yaml
 from ollama import Client
 
 from brain_agents.ask import ask
+from brain_agents.text_inbox import _split_frontmatter
 
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[4]
+
+
+# --- A4 provenance ---------------------------------------------------------
+
+_KIND_RULES: tuple[tuple[str, str], ...] = (
+    ("/inbox-auto-pdf/", "pdf"),
+    ("/inbox-auto-image/", "image"),
+    ("/inbox-auto-audio/", "audio"),
+    ("/05-contacts/", "person-note"),
+    ("/04-journal/", "journal"),
+)
+
+
+def _classify_source(path_str: str) -> str:
+    p = "/" + path_str.replace("\\", "/").lower()
+    for needle, kind in _KIND_RULES:
+        if needle in p:
+            return kind
+    return "note"
+
+
+def _read_frontmatter(path: Path) -> dict[str, Any]:
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return {}
+    fm, _ = _split_frontmatter(text)
+    return fm or {}
+
+
+def enrich_provenance(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return sources annotated with {kind, asset_sha256?, asset_type?,
+    person_id?, ocr_status?, asr_status?}.
+    """
+    enriched: list[dict[str, Any]] = []
+    for row in sources:
+        path_str = str(row.get("path", "") or "")
+        item: dict[str, Any] = {
+            "path": path_str,
+            "title": row.get("title", ""),
+            "method": row.get("method", ""),
+            "kind": _classify_source(path_str),
+        }
+        if path_str:
+            try:
+                p = Path(path_str)
+                if p.exists() and p.is_file() and p.suffix.lower() in {".md", ".markdown"}:
+                    fm = _read_frontmatter(p)
+                    for k in ("asset_sha256", "asset_type", "person_id", "ocr_status", "asr_status"):
+                        if k in fm:
+                            item[k] = fm[k]
+            except Exception:
+                pass
+        enriched.append(item)
+    return enriched
+
+
+def render_provenance_block(enriched: list[dict[str, Any]]) -> str:
+    """Render a `## 参考` tail block from an already-enriched provenance list."""
+    if not enriched:
+        return ""
+    lines = ["## 参考", ""]
+    for i, e in enumerate(enriched, 1):
+        bits: list[str] = [str(e.get("kind", "note"))]
+        title = str(e.get("title", "")).strip()
+        if title:
+            bits.append(title)
+        sha = e.get("asset_sha256")
+        if sha:
+            bits.append(f"sha256:{sha}")
+        person_id = e.get("person_id")
+        if person_id:
+            bits.append(f"person:{person_id}")
+        label = " · ".join(bits)
+        path = e.get("path", "")
+        lines.append(f"- [{i}] {label} — `{path}`")
+    return "\n".join(lines)
 
 
 def _constraints() -> dict[str, Any]:
@@ -98,6 +176,8 @@ def write_draft(
     reader: str,
     source_limit: int = 5,
     engine: str = "llm",
+    *,
+    include_provenance: bool = True,
 ) -> dict[str, Any]:
     cfg = _constraints().get("writing", {})
     style = cfg.get("platform_style", {}).get(platform, cfg.get("platform_style", {}).get("default", {}))
@@ -171,10 +251,11 @@ def write_draft(
         draft = "\n\n".join(paragraphs)
         draft = _apply_constraints(draft, max_paragraphs, max_chars, banned)
 
-    provenance = [
-        {"path": row.get("path", ""), "title": row.get("title", ""), "method": row.get("method", "")}
-        for row in sources
-    ]
+    provenance = enrich_provenance(sources)
+    if include_provenance and provenance:
+        block = render_provenance_block(provenance)
+        if block:
+            draft = draft.rstrip() + "\n\n" + block + "\n"
     out: dict[str, Any] = {
         "topic": topic,
         "platform": platform,
