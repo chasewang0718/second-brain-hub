@@ -1,0 +1,63 @@
+version: 1
+description: "Chinese query golden set for ask-engine top-k relevance checks"
+cases:
+  - id: nl_notary_letter
+    query: "荷兰公证员流程"
+    expected_any:
+      - "notariaat"
+      - "koper"
+      - "housing"
+  - id: invoice_tax
+    query: "荷兰发票和税务"
+    expected_any:
+      - "factuur"
+      - "invoice"
+      - "btw"
+  - id: people_overdue
+    query: "谁最近40天没联系"
+    expected_any:
+      - "brain-health"
+      - "digest"
+      - "people"
+  - id: wechat_project
+    query: "wechat 缓存 项目"
+    expected_any:
+      - "wechat"
+      - "project"
+      - "cache"
+  - id: structure_opt
+    query: "目录结构优化建议"
+    expected_any:
+      - "structure"
+      - "history"
+      - "dry-run"
+  - id: writing_constraints
+    query: "写作约束 banned phrases"
+    expected_any:
+      - "writing"
+      - "constraints"
+      - "config"
+  - id: cursor_queue
+    query: "cursor queue 失败兜底"
+    expected_any:
+      - "cursor_queue"
+      - "queue"
+      - "escalation"
+  - id: digest_weekly
+    query: "每周回顾摘要"
+    expected_any:
+      - "weekly"
+      - "digest"
+      - "review"
+  - id: ask_engine
+    query: "ask 检索 混合重排"
+    expected_any:
+      - "ask"
+      - "retrieval"
+      - "hybrid"
+  - id: mcp_paths
+    query: "mcp 读取 paths 配置"
+    expected_any:
+      - "paths"
+      - "mcp"
+      - "config"

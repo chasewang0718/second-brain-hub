@@ -14,6 +14,20 @@ ALIASES: dict[str, list[str]] = {
     "公证员": ["notary", "notaris", "notariaat", "notarieel"],
     "税": ["tax", "belasting", "btw", "inkomstenbelasting"],
     "发票": ["invoice", "factuur", "proforma"],
+    "联系": ["contact", "overdue", "people", "meeting"],
+    "谁": ["who", "person", "people"],
+    "回顾": ["review", "weekly", "digest"],
+    "摘要": ["digest", "summary"],
+    "结构": ["structure", "directory", "history", "split"],
+    "优化": ["optimize", "improve", "suggestion"],
+    "写作": ["write", "draft", "constraints"],
+    "约束": ["constraint", "banned", "phrase", "max_chars"],
+    "配置": ["config", "yaml", "paths"],
+    "读取": ["read", "load", "paths"],
+    "检索": ["search", "retrieval", "ask", "hybrid", "rerank"],
+    "混合": ["hybrid", "fusion", "rerank"],
+    "队列": ["queue", "cursor_queue", "escalation"],
+    "兜底": ["fallback", "queue", "cursor_queue"],
 }
 
 
