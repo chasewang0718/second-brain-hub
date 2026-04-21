@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    处置 D:\brain-assets\98-staging\ 113 个杂项 (L1 删除 + L2 聚类归档 + L3 候选).
+    处置 D:\second-brain-assets\98-staging\ 113 个杂项 (L1 删除 + L2 聚类归档 + L3 候选).
 
 .DESCRIPTION
     按 3 层处理:
@@ -28,8 +28,8 @@ param(
     [switch]$SkipL2
 )
 
-$STAGING   = "D:\brain-assets\98-staging"
-$ASSETS    = "D:\brain-assets"
+$STAGING   = "D:\second-brain-assets\98-staging"
+$ASSETS    = "D:\second-brain-assets"
 $LOG       = Join-Path $ASSETS "_migration\98-staging-dispose.log"
 $L3_LIST   = Join-Path $ASSETS "_migration\98-staging-l3-agent-list.txt"
 

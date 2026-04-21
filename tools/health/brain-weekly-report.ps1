@@ -9,7 +9,7 @@
 
 .NOTES
     - 触发方式: 每周日 21:00 (Task Scheduler)
-    - 日志:     D:\brain\.brain-weekly.log
+    - 日志:     D:\second-brain-content\.brain-weekly.log
     - 手动跑:   直接 .\brain-weekly-report.ps1
 
     更新历史:
@@ -21,7 +21,7 @@ $ErrorActionPreference = 'Continue'
 # ============================================================
 # 配置 (与 PowerShell profile 一致)
 # ============================================================
-$BRAIN_ROOT  = "D:\brain"
+$BRAIN_ROOT  = "D:\second-brain-content"
 $AGENT_CMD   = "C:\Users\chase\AppData\Local\cursor-agent\agent.cmd"
 $LOG_FILE    = Join-Path $BRAIN_ROOT ".brain-weekly.log"
 $LOCK_FILE   = Join-Path $BRAIN_ROOT ".brain-weekly.lock"

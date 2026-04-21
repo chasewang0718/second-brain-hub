@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     注册 Windows 任务计划程序: 每晚 22:00 跑 brain-nightly-push.ps1.
@@ -43,7 +43,7 @@ $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interac
 
 Register-ScheduledTask -TaskName $TaskName `
     -Action $action -Trigger $trigger -Settings $settings -Principal $principal `
-    -Description "每晚 $Time 自动把 D:\brain 和 second-brain-hub 推到 GitHub" `
+    -Description "每晚 $Time 自动把 D:\second-brain-content 和 second-brain-hub 推到 GitHub" `
     -Force | Out-Null
 
 Write-Host "已注册任务: $TaskName (每天 $Time)" -ForegroundColor Green

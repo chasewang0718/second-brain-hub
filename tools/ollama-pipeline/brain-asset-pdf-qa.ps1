@@ -41,8 +41,8 @@
 
 [CmdletBinding()]
 param(
-    [string]$ProposalDir = "D:\brain-assets\_migration\ollama-output",
-    [int]$SamplePercent = 15,
+    [string]$ProposalDir = "",
+    [int]$SamplePercent = 0,
     [string]$AuditorCmd = "cursor-agent",
     [int]$MaxItems = 0,
     [switch]$SkipLowConfAll,
@@ -50,6 +50,47 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# 配置加载 (优先读 config/*.yaml; 失败则回退硬编码默认值)
+$HUB_ROOT = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)  # second-brain-hub/
+$configLoader = Join-Path $HUB_ROOT "tools\lib\config-loader.ps1"
+if (Test-Path $configLoader) {
+    . $configLoader
+}
+$telemetryLib = Join-Path $HUB_ROOT "tools\lib\telemetry.ps1"
+if (Test-Path $telemetryLib) {
+    . $telemetryLib
+}
+
+function Get-ConfigOrDefault {
+    param(
+        [string]$File,
+        [string]$Key,
+        $DefaultValue
+    )
+    if (Get-Command Get-BrainConfig -ErrorAction SilentlyContinue) {
+        try { return (Get-BrainConfig -File $File -Key $Key) } catch {}
+    }
+    return $DefaultValue
+}
+
+function Write-TelemetrySafe {
+    param([hashtable]$Entry)
+    if (-not (Get-Command Write-Telemetry -ErrorAction SilentlyContinue)) {
+        return
+    }
+    try {
+        [void](Write-Telemetry -Entry $Entry)
+    } catch {}
+}
+
+if ([string]::IsNullOrWhiteSpace($ProposalDir)) {
+    $ProposalDir = Get-ConfigOrDefault -File "paths" -Key "paths.ollama_output_dir" -DefaultValue "D:\second-brain-assets\_migration\ollama-output"
+}
+if ($SamplePercent -le 0) {
+    $SamplePercent = [int](Get-ConfigOrDefault -File "thresholds" -Key "pdf.qa_sample_percent" -DefaultValue 15)
+}
+$LowConfThreshold = [double](Get-ConfigOrDefault -File "thresholds" -Key "pdf.confidence_below" -DefaultValue 0.7)
 
 # ============================================================
 # 前置
@@ -83,7 +124,7 @@ foreach ($f in $allJson) {
 $toAudit = [System.Collections.ArrayList]@()
 foreach ($p in $proposals) {
     $reason = $null
-    if ($p.Data.classification.confidence -lt 0.7 -and -not $SkipLowConfAll) {
+    if ($p.Data.classification.confidence -lt $LowConfThreshold -and -not $SkipLowConfAll) {
         $reason = "low-confidence"
     } elseif ($highRiskCats -contains $p.Data.classification.category) {
         $reason = "high-risk-category"
@@ -190,6 +231,18 @@ $realText
     } catch {
         Write-Host "audit-fail ($_)" -ForegroundColor Red
         $verdictCount."audit-fail"++
+        Write-TelemetrySafe -Entry @{
+            task         = "qa-audit"
+            executor     = "cloud"
+            model        = $AuditorCmd
+            duration_ms  = [int]((Get-Date) - $t0).TotalMilliseconds
+            schema_valid = $false
+            escalated    = $false
+            source       = $pdfPath
+            source_hash  = $p.Data.sha12
+            qa_verdict   = "fail"
+            retry_reason = "audit-fail"
+        }
         continue
     }
     $ms = [int]((Get-Date) - $t0).TotalMilliseconds
@@ -204,12 +257,39 @@ $realText
     } catch {
         Write-Host "parse-fail" -ForegroundColor Red
         $verdictCount."audit-fail"++
+        Write-TelemetrySafe -Entry @{
+            task         = "qa-audit"
+            executor     = "cloud"
+            model        = $AuditorCmd
+            duration_ms  = $ms
+            schema_valid = $false
+            escalated    = $false
+            source       = $pdfPath
+            source_hash  = $p.Data.sha12
+            qa_verdict   = "fail"
+            retry_reason = "parse-fail"
+        }
         continue
     }
 
     Write-Host ("{0} ({1}ms)" -f $verdict.verdict, $ms) -ForegroundColor $(switch ($verdict.verdict) { "ok" {"Green"}; "needs-fix" {"Yellow"}; default {"Red"} })
 
     $verdictCount[$verdict.verdict]++
+    Write-TelemetrySafe -Entry @{
+        task             = "qa-audit"
+        executor         = "cloud"
+        model            = $AuditorCmd
+        duration_ms      = $ms
+        schema_valid     = $true
+        escalated        = $false
+        source           = $pdfPath
+        source_hash      = $p.Data.sha12
+        confidence       = $p.Data.classification.confidence
+        category         = $p.Data.classification.category
+        qa_verdict       = $verdict.verdict
+        qa_auditor_model = $AuditorCmd
+        output_summary   = $verdict.notes
+    }
 
     [void]$mdLines.Add("## [$i] $($p.Data.source_filename)")
     [void]$mdLines.Add("")

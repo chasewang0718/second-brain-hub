@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     守护 Phase 2.3 批处理 PID, 结束后自动跑 overview-cards dry-run.
@@ -10,7 +10,7 @@
       生成候选清单给用户 review, 用户决定是否 -Execute.
 
     watcher 本身很轻: 只是个 sleep + Get-Process loop.
-    watcher 日志: D:\brain\.brain-watcher.log (gitignore 已忽略)
+    watcher 日志: D:\second-brain-content\.brain-watcher.log (gitignore 已忽略)
 #>
 
 [CmdletBinding()]
@@ -20,7 +20,7 @@ param(
     [int]$PollSeconds = 300  # 5 min
 )
 
-$logPath = "D:\brain\.brain-watcher.log"
+$logPath = "D:\second-brain-content\.brain-watcher.log"
 
 function Log($line) {
     $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"

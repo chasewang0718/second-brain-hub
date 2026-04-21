@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     Chase 的 PowerShell 配置. brain / 开发工作流常用函数.
@@ -19,9 +19,9 @@
 # 配置
 # ============================================================
 
-$BRAIN_ROOT = "D:\brain"
+$BRAIN_ROOT = "D:\second-brain-content"
 $BRAIN_INBOX = Join-Path $BRAIN_ROOT "99-inbox"
-$BRAIN_ASSETS_ROOT = "D:\brain-assets"
+$BRAIN_ASSETS_ROOT = "D:\second-brain-assets"
 $BRAIN_HUB_ROOT = "C:\dev-projects\second-brain-hub"
 $BRAIN_TOOLS_ROOT = $BRAIN_HUB_ROOT  # backward compat alias
 
@@ -73,6 +73,22 @@ status: unprocessed
     Write-Host "✅ 已存入 inbox: " -ForegroundColor Green -NoNewline
     Write-Host $fileName -ForegroundColor Cyan
     Write-Host "   $lineCount 行 / $charCount 字符" -ForegroundColor DarkGray
+
+    # F1.2 telemetry: record each gsave for usage tracking.
+    try {
+        $detailObj = @{
+            file = $fileName
+            chars = $charCount
+            lines = $lineCount
+        }
+        $detailPath = Join-Path $env:TEMP ("brain-telemetry-" + [guid]::NewGuid().ToString("N") + ".json")
+        $detailObj | ConvertTo-Json -Compress | Set-Content -Path $detailPath -Encoding UTF8
+        & python -m uv run --directory "C:\dev-projects\second-brain-hub\tools\py" brain telemetry-append --source ahk --event gsave --detail-file $detailPath | Out-Null
+        Remove-Item $detailPath -Force -ErrorAction SilentlyContinue
+    }
+    catch {
+        Write-Host "   telemetry skipped: $($_.Exception.Message)" -ForegroundColor DarkGray
+    }
 
     # 计数 + 阈值判断
     $pasteCount = @(Get-ChildItem $BRAIN_INBOX -Filter "paste-*.md").Count
@@ -223,7 +239,7 @@ function brain-ask {
 
     $q = $Query -join " "
     $prompt = @"
-你在只读模式查询 brain 仓库 (D:\brain)。
+你在只读模式查询 brain 仓库 (D:\second-brain-content)。
 
 【严格禁令】绝对不要创建/修改/删除任何文件, 不要 git add/commit/push,
 不要写入 00-memory/, 不要碰 99-inbox/。本次任务只是搜索 + 回答。

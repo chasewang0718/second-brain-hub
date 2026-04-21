@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     本地 Ollama + pdftotext PDF 分类 worker. 替代 cursor-agent 跑 Phase 2.3 的量产层.
@@ -12,10 +12,10 @@
     输出不做文件移动, 只产 JSON proposal. apply 由 brain-asset-pdf-apply.ps1 做.
 
 .PARAMETER InboxDir
-    PDF 源目录, 默认 D:\brain-assets\99-inbox
+    PDF 源目录, 默认 D:\second-brain-assets\99-inbox
 
 .PARAMETER OutputDir
-    JSON proposal 输出目录, 默认 D:\brain-assets\_migration\ollama-output
+    JSON proposal 输出目录, 默认 D:\second-brain-assets\_migration\ollama-output
 
 .PARAMETER Model
     Ollama 模型名, 默认 qwen2.5:14b-instruct
@@ -47,21 +47,109 @@
 
 [CmdletBinding()]
 param(
-    [string]$InboxDir = "D:\brain-assets\99-inbox",
-    [string]$OutputDir = "D:\brain-assets\_migration\ollama-output",
+    [string]$InboxDir = "",
+    [string]$OutputDir = "",
+    [string]$EscalationDir = "",
     [string]$Model = "qwen2.5:14b-instruct",
     [string]$OllamaUrl = "http://localhost:11434",
     [int]$MaxItems = 0,
-    [int]$TimeoutSec = 180,
+    [int]$TimeoutSec = 0,
     [switch]$DryRun
 )
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
+# 配置加载 (优先读 config/*.yaml; 失败则回退硬编码默认值)
+$HUB_ROOT = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)  # second-brain-hub/
+$configLoader = Join-Path $HUB_ROOT "tools\lib\config-loader.ps1"
+if (Test-Path $configLoader) {
+    . $configLoader
+}
+$telemetryLib = Join-Path $HUB_ROOT "tools\lib\telemetry.ps1"
+if (Test-Path $telemetryLib) {
+    . $telemetryLib
+}
+
+function Get-ConfigOrDefault {
+    param(
+        [string]$File,
+        [string]$Key,
+        $DefaultValue
+    )
+    if (Get-Command Get-BrainConfig -ErrorAction SilentlyContinue) {
+        try { return (Get-BrainConfig -File $File -Key $Key) } catch {}
+    }
+    return $DefaultValue
+}
+
+function Write-TelemetrySafe {
+    param([hashtable]$Entry)
+    if (-not (Get-Command Write-Telemetry -ErrorAction SilentlyContinue)) {
+        return
+    }
+    try {
+        [void](Write-Telemetry -Entry $Entry)
+    } catch {}
+}
+
+function Write-EscalationItemSafe {
+    param(
+        [string]$Reason,
+        [string]$SourcePath,
+        [string]$SourceFileName,
+        [string]$SourceHash,
+        [int]$DurationMs,
+        [double]$Confidence,
+        [bool]$SchemaValid,
+        [string]$RawOutput
+    )
+    try {
+        if (-not (Test-Path $EscalationDir)) {
+            New-Item -ItemType Directory -Path $EscalationDir -Force | Out-Null
+        }
+        $ts = (Get-Date).ToUniversalTime()
+        $safeHash = if ([string]::IsNullOrWhiteSpace($SourceHash)) { "unknown" } else { $SourceHash }
+        $fileName = "{0}_{1}_{2}.json" -f $ts.ToString("yyyy-MM-dd"), "pdf-classify", $safeHash
+        $path = Join-Path $EscalationDir $fileName
+
+        $payload = [ordered]@{
+            ts            = $ts.ToString("yyyy-MM-ddTHH:mm:ssZ")
+            task          = "pdf-classify"
+            source        = $SourcePath
+            source_file   = $SourceFileName
+            source_hash   = $safeHash
+            local_attempt = @{
+                model        = $Model
+                confidence   = $Confidence
+                schema_valid = $SchemaValid
+                duration_ms  = $DurationMs
+                raw_output   = $RawOutput
+            }
+            reason        = $Reason
+            priority      = "normal"
+            status        = "pending"
+        }
+        $payload | ConvertTo-Json -Depth 10 | Out-File -FilePath $path -Encoding UTF8
+    } catch {}
+}
+
+if ([string]::IsNullOrWhiteSpace($InboxDir)) {
+    $InboxDir = Get-ConfigOrDefault -File "paths" -Key "paths.pdf_inbox_dir" -DefaultValue "D:\second-brain-assets\99-inbox"
+}
+if ([string]::IsNullOrWhiteSpace($OutputDir)) {
+    $OutputDir = Get-ConfigOrDefault -File "paths" -Key "paths.ollama_output_dir" -DefaultValue "D:\second-brain-assets\_migration\ollama-output"
+}
+if ([string]::IsNullOrWhiteSpace($EscalationDir)) {
+    $EscalationDir = Get-ConfigOrDefault -File "paths" -Key "paths.escalation_dir" -DefaultValue "D:\second-brain-assets\_escalation"
+}
+if ($TimeoutSec -le 0) {
+    $TimeoutSec = [int](Get-ConfigOrDefault -File "thresholds" -Key "pdf.timeout_sec" -DefaultValue 180)
+}
+$LowConfThreshold = [double](Get-ConfigOrDefault -File "thresholds" -Key "pdf.confidence_below" -DefaultValue 0.7)
+
 # 载 prompt (system + few-shot 拼成一个大 string)
 # prompt 源已迁到 hub 的 prompts/system/pdf-classifier.md (保持单一真相源)
-$HUB_ROOT = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)  # second-brain-hub/
 $promptFile = Join-Path $HUB_ROOT "prompts\system\pdf-classifier.md"
 if (-not (Test-Path $promptFile)) {
     # 向后兼容: 旧位置 (同目录)
@@ -349,9 +437,21 @@ $($textData.Text)
     try {
         $respText = Invoke-Ollama -System $systemPrompt -UserMsg $userMsg -Timeout $TimeoutSec
     } catch {
+        $ms = [int]((Get-Date) - $t0).TotalMilliseconds
         Write-Host "  × Ollama 失败: $_" -ForegroundColor Red
         if (-not $DryRun) {
             "$sha12`t$($pdf.Name)`tollama-fail: $_`t$(Get-Date -Format o)" | Add-Content $needsReviewLog -Encoding UTF8
+            Write-TelemetrySafe -Entry @{
+                task         = "pdf-classify"
+                executor     = "local"
+                model        = $Model
+                duration_ms  = $ms
+                schema_valid = $false
+                escalated    = $false
+                source       = $pdf.FullName
+                source_hash  = $sha12
+                retry_reason = "ollama-fail"
+            }
         }
         $stats.OLLAMA_FAIL++
         continue
@@ -365,6 +465,17 @@ $($textData.Text)
         Write-Host "  × JSON 解析失败" -ForegroundColor Red
         if (-not $DryRun) {
             "$sha12`t$($pdf.Name)`tjson-parse-fail`t$(Get-Date -Format o)" | Add-Content $needsReviewLog -Encoding UTF8
+            Write-TelemetrySafe -Entry @{
+                task         = "pdf-classify"
+                executor     = "local"
+                model        = $Model
+                duration_ms  = $ms
+                schema_valid = $false
+                escalated    = $false
+                source       = $pdf.FullName
+                source_hash  = $sha12
+                retry_reason = "json-parse-fail"
+            }
         }
         $stats.SCHEMA_FAIL++
         continue
@@ -374,6 +485,26 @@ $($textData.Text)
         Write-Host "  × schema 不合: $schemaErr" -ForegroundColor Red
         if (-not $DryRun) {
             "$sha12`t$($pdf.Name)`tschema: $schemaErr`t$(Get-Date -Format o)" | Add-Content $needsReviewLog -Encoding UTF8
+            Write-EscalationItemSafe `
+                -Reason "schema_fail" `
+                -SourcePath $pdf.FullName `
+                -SourceFileName $pdf.Name `
+                -SourceHash $sha12 `
+                -DurationMs $ms `
+                -Confidence 0 `
+                -SchemaValid $false `
+                -RawOutput $respText
+            Write-TelemetrySafe -Entry @{
+                task         = "pdf-classify"
+                executor     = "local"
+                model        = $Model
+                duration_ms  = $ms
+                schema_valid = $false
+                escalated    = $false
+                source       = $pdf.FullName
+                source_hash  = $sha12
+                retry_reason = "schema-fail"
+            }
         }
         $stats.SCHEMA_FAIL++
         continue
@@ -392,7 +523,7 @@ $($textData.Text)
         classification    = $obj
     }
 
-    $lowConf = ($obj.confidence -lt 0.7)
+    $lowConf = ($obj.confidence -lt $LowConfThreshold)
     $confMark = if ($lowConf) { "[低置信]" } else { "" }
     Write-Host ("  OK {0,5}ms  {1,-14}  {2}  conf={3:N2} {4}" -f $ms, $obj.category, $obj.slug, $obj.confidence, $confMark) -ForegroundColor Green
 
@@ -402,8 +533,46 @@ $($textData.Text)
         $proposal | ConvertTo-Json -Depth 10 | Out-File -FilePath $outJson -Encoding UTF8
         if ($lowConf) {
             "$sha12`t$($pdf.Name)`tlow-confidence: $($obj.confidence)`t$(Get-Date -Format o)" | Add-Content $needsReviewLog -Encoding UTF8
+            Write-EscalationItemSafe `
+                -Reason "confidence_below_threshold" `
+                -SourcePath $pdf.FullName `
+                -SourceFileName $pdf.Name `
+                -SourceHash $sha12 `
+                -DurationMs $ms `
+                -Confidence ([double]$obj.confidence) `
+                -SchemaValid $true `
+                -RawOutput $respText
+            Write-TelemetrySafe -Entry @{
+                task          = "pdf-classify"
+                executor      = "local"
+                model         = $Model
+                duration_ms   = $ms
+                schema_valid  = $true
+                escalated     = $true
+                confidence    = $obj.confidence
+                category      = $obj.category
+                source        = $pdf.FullName
+                source_hash   = $sha12
+                output_summary = $obj.reasoning_brief
+                retry_reason  = "confidence_below_threshold"
+                qa_verdict    = "unsampled"
+            }
             $stats.LOW_CONF++
         } else {
+            Write-TelemetrySafe -Entry @{
+                task           = "pdf-classify"
+                executor       = "local"
+                model          = $Model
+                duration_ms    = $ms
+                schema_valid   = $true
+                escalated      = $false
+                confidence     = $obj.confidence
+                category       = $obj.category
+                source         = $pdf.FullName
+                source_hash    = $sha12
+                output_summary = $obj.reasoning_brief
+                qa_verdict     = "unsampled"
+            }
             $stats.OK++
         }
     }
@@ -413,6 +582,17 @@ $($textData.Text)
         if (-not $DryRun) {
             $shaSafe = if ($sha12) { $sha12 } else { "unknown" }
             "$shaSafe`t$($pdf.Name)`tunexpected: $_`t$(Get-Date -Format o)" | Add-Content $needsReviewLog -Encoding UTF8
+            Write-TelemetrySafe -Entry @{
+                task         = "pdf-classify"
+                executor     = "local"
+                model        = $Model
+                duration_ms  = 0
+                schema_valid = $false
+                escalated    = $false
+                source       = $pdf.FullName
+                source_hash  = $shaSafe
+                retry_reason = "unexpected"
+            }
         }
         $stats.UNEXPECTED++
         continue

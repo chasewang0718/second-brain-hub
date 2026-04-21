@@ -4,7 +4,7 @@
     对 brain-assets 的叶子目录补 "集群总览卡" (Tier A README/overview), 让 Tier B 内容进入可搜索索引.
 
 .DESCRIPTION
-    扫 D:\brain-assets 找出叶子目录 (包含 >= MinFiles 个文件的目录):
+    扫 D:\second-brain-assets 找出叶子目录 (包含 >= MinFiles 个文件的目录):
     - 如果 Tier A 对应目录已经有 README.md 或 overview.md, 跳
     - 否则让 cursor-agent 采样 3-5 个文件名 (不读内容, 省 token), 生成 overview.md
 
@@ -15,8 +15,8 @@
 
 [CmdletBinding()]
 param(
-    [string]$AssetsRoot = "D:\brain-assets",
-    [string]$BrainRoot  = "D:\brain",
+    [string]$AssetsRoot = "D:\second-brain-assets",
+    [string]$BrainRoot  = "D:\second-brain-content",
     [int]$MinFiles = 3,
     [int]$MaxItems = 5,
     [switch]$Execute

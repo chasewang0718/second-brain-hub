@@ -28,7 +28,7 @@
     只跑指定 namespace (可多个). 留空 = 所有.
 
 .PARAMETER SourceDir
-    默认 D:\brain-assets\99-inbox
+    默认 D:\second-brain-assets\99-inbox
 #>
 
 [CmdletBinding()]
@@ -38,12 +38,12 @@ param(
     [int]$MaxPdfs = 0,
     [int]$SleepSec = 0,
     [string[]]$OnlyNamespace,
-    [string]$SourceDir = "D:\brain-assets\99-inbox"
+    [string]$SourceDir = "D:\second-brain-assets\99-inbox"
 )
 
 $AGENT_CMD    = "C:\Users\chase\AppData\Local\cursor-agent\agent.cmd"
-$BRAIN_ROOT   = "D:\brain"
-$ASSETS_ROOT  = "D:\brain-assets"
+$BRAIN_ROOT   = "D:\second-brain-content"
+$ASSETS_ROOT  = "D:\second-brain-assets"
 $MIGRATION    = Join-Path $ASSETS_ROOT "_migration"
 $MANIFEST     = Join-Path $MIGRATION "baidu-2026-04-manifest.tsv"
 $PILOT_SCRIPT = Join-Path $PSScriptRoot "brain-asset-pdf-pilot.ps1"
@@ -157,23 +157,23 @@ function Get-BatchPrompt($pdfPath, $sizeMB) {
 @"
 任务: 归档这份 PDF -> $pdfPath (大小 $sizeMB MB)
 
-这份 PDF 已经在 D:\brain-assets\99-inbox\ 下, 来自 Phase 2.2 百度云批量迁移. 现在让你读它然后把它归档.
+这份 PDF 已经在 D:\second-brain-assets\99-inbox\ 下, 来自 Phase 2.2 百度云批量迁移. 现在让你读它然后把它归档.
 
 请依次做 5 步, 不要问我任何问题, 不要写长篇介绍, 直接做:
 
 第1步: 打开读这份 PDF: $pdfPath
 
 第2步: 决定它该归到哪个类别 (参考下表):
-- 发票账单 -> Tier A: D:\brain\07-life\finance\    Tier B: D:\brain-assets\07-life\finance\
-- 医疗健康 -> Tier A: D:\brain\07-life\health\     Tier B: D:\brain-assets\07-life\health\
-- 证件身份 -> Tier A: D:\brain\07-life\identity\   Tier B: D:\brain-assets\07-life\identity\
-- 房屋合同 -> Tier A: D:\brain\07-life\housing\    Tier B: D:\brain-assets\07-life\housing\
-- 公司税务 -> Tier A: D:\brain\07-life\business\   Tier B: D:\brain-assets\07-life\business\
-- 荷兰 Inburgering -> Tier A: D:\brain\07-life\dutch-inburgering\  Tier B: D:\brain-assets\07-life\dutch-inburgering\
-- 儿童学习 -> Tier A: D:\brain\07-life\kids-learning\              Tier B: D:\brain-assets\07-life\kids-learning\
-- 长书/技术 -> Tier A: D:\brain\01-concepts\books\                 Tier B: D:\brain-assets\16-books\
-- LaTeX项目 -> Tier A: D:\brain\03-projects\<proj>\                Tier B: D:\brain-assets\03-projects\<proj>\
-- 绘本写作 -> Tier A: D:\brain\01-concepts\picture-books\          Tier B: D:\brain-assets\16-books\picture-books\
+- 发票账单 -> Tier A: D:\second-brain-content\07-life\finance\    Tier B: D:\second-brain-assets\07-life\finance\
+- 医疗健康 -> Tier A: D:\second-brain-content\07-life\health\     Tier B: D:\second-brain-assets\07-life\health\
+- 证件身份 -> Tier A: D:\second-brain-content\07-life\identity\   Tier B: D:\second-brain-assets\07-life\identity\
+- 房屋合同 -> Tier A: D:\second-brain-content\07-life\housing\    Tier B: D:\second-brain-assets\07-life\housing\
+- 公司税务 -> Tier A: D:\second-brain-content\07-life\business\   Tier B: D:\second-brain-assets\07-life\business\
+- 荷兰 Inburgering -> Tier A: D:\second-brain-content\07-life\dutch-inburgering\  Tier B: D:\second-brain-assets\07-life\dutch-inburgering\
+- 儿童学习 -> Tier A: D:\second-brain-content\07-life\kids-learning\              Tier B: D:\second-brain-assets\07-life\kids-learning\
+- 长书/技术 -> Tier A: D:\second-brain-content\01-concepts\books\                 Tier B: D:\second-brain-assets\16-books\
+- LaTeX项目 -> Tier A: D:\second-brain-content\03-projects\<proj>\                Tier B: D:\second-brain-assets\03-projects\<proj>\
+- 绘本写作 -> Tier A: D:\second-brain-content\01-concepts\picture-books\          Tier B: D:\second-brain-assets\16-books\picture-books\
 - 其他 -> 按内容建新目录 (内容驱动结构, 你有 L1 权限)
 
 第3步: 生成 kebab-case slug (全英文/拼音, 不要空格或中文)

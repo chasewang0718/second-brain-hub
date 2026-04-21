@@ -1,10 +1,10 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    生成 D:\brain-assets 资产分布 + 增长趋势 + ext 统计报告.
+    生成 D:\second-brain-assets 资产分布 + 增长趋势 + ext 统计报告.
 
 .DESCRIPTION
-    输出到 D:\brain\04-journal\brain-assets-stats-YYYY-MM-DD.md
+    输出到 D:\second-brain-content\04-journal\brain-assets-stats-YYYY-MM-DD.md
     内容:
     - 一级目录: 文件数 / 总大小
     - 扩展名 top 20: 文件数 / 总大小
@@ -15,8 +15,8 @@
 
 [CmdletBinding()]
 param(
-    [string]$AssetsRoot = "D:\brain-assets",
-    [string]$BrainRoot  = "D:\brain"
+    [string]$AssetsRoot = "D:\second-brain-assets",
+    [string]$BrainRoot  = "D:\second-brain-content"
 )
 
 $today = Get-Date -Format "yyyy-MM-dd"

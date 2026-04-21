@@ -28,7 +28,7 @@
     清完文件后, 顺手删掉源端空目录 (默认 true, 提高清洁度).
 
 .NOTES
-    - 日志: D:\brain-assets\_migration\<job>-cleanup.log
+    - 日志: D:\second-brain-assets\_migration\<job>-cleanup.log
     - 失败也不中断, 最后出汇总
 #>
 
@@ -40,9 +40,9 @@ param(
     [bool]$DeleteEmptyDirs = $true
 )
 
-$ASSETS_ROOT = "D:\brain-assets"
+$ASSETS_ROOT = "D:\second-brain-assets"
 $MIGRATION_DIR = Join-Path $ASSETS_ROOT "_migration"
-$BRAIN_ROOT = "D:\brain"
+$BRAIN_ROOT = "D:\second-brain-content"
 
 # ============================================================
 # 定位 manifest

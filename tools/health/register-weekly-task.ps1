@@ -45,7 +45,7 @@ if ($Remove) {
 if ($RunNow) {
     Write-Host "▶️  立即手动运行周报任务 (测试)..." -ForegroundColor Cyan
     powershell -NoProfile -ExecutionPolicy Bypass -File $SCRIPT_PATH
-    Write-Host "✅ 运行完成, 看日志: Get-Content D:\brain\.brain-weekly.log -Tail 30" -ForegroundColor Green
+    Write-Host "✅ 运行完成, 看日志: Get-Content D:\second-brain-content\.brain-weekly.log -Tail 30" -ForegroundColor Green
     return
 }
 

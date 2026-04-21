@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    SHA256 扫 D:\brain-assets 找重复文件, 默认 dry-run.
+    SHA256 扫 D:\second-brain-assets 找重复文件, 默认 dry-run.
 
 .DESCRIPTION
     两遍扫描:
@@ -13,7 +13,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$AssetsRoot = "D:\brain-assets",
+    [string]$AssetsRoot = "D:\second-brain-assets",
     [int]$MinSizeKB = 10,  # 小于 10KB 的小文件跳过 (算不出有意义的重复, 比如空 .gitkeep)
     [switch]$IncludeInbox  # 默认跳 99-inbox (批处理中, 易变)
 )

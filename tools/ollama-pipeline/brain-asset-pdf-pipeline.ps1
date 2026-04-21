@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     PDF 本地分类 pipeline 三步一条龙: worker -> QA -> apply.

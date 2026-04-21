@@ -27,7 +27,7 @@ Start-Process powershell.exe -ArgumentList @(
 
 ## 产出
 
-`D:\brain-assets\_migration\_watchdog\`:
+`D:\second-brain-assets\_migration\_watchdog\`:
 
 - `alerts.log` — 所有告警一行一条
 - `heartbeat.txt` — 每 30 min 刷新一次的 JSON 状态 (白天查最后更新时间)

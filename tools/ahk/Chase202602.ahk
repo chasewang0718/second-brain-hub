@@ -1,5 +1,15 @@
 ﻿#Requires AutoHotkey v2.0
 
+; CapsLock+D → PowerShell gsave（必须与下方其它 CapsLock & 组合同在本文；勿另开脚本注册同一热键）
+global GS_LOG_FILE := "C:\dev-projects\second-brain-hub\telemetry\logs\gsave-log.txt"
+
+LogGsave(msg) {
+    global GS_LOG_FILE
+    DirCreate "C:\dev-projects\second-brain-hub\telemetry\logs"
+    ts := FormatTime(A_Now, "yyyy-MM-dd HH:mm:ss")
+    try FileAppend ts . "  " . msg . "`n", GS_LOG_FILE
+}
+
 ; ========================================================
 ; 1. 核心组合键：Tab 体系 (关闭、截图)
 ; ========================================================
@@ -38,6 +48,34 @@ CapsLock & w::Send "^z"    ; 撤销 (Ctrl+Z) - [新增]
 CapsLock & e::Send "^y"    ; 重做 (Ctrl+Y) - [新增]
 CapsLock & a::Send "^a"    ; 全选 (Ctrl+A)
 CapsLock & s::Send "^s"    ; 保存 (Ctrl+S)
+
+CapsLock & d::
+{
+    LogGsave("CapsLock+D trigger")
+    savedClip := ClipboardAll()
+    A_Clipboard := ""
+    Send "^c"
+    copiedOk := ClipWait(0.5)
+    if (copiedOk) {
+        LogGsave("selection copied len=" . StrLen(A_Clipboard))
+    } else {
+        A_Clipboard := savedClip
+        LogGsave("fallback clipboard len=" . StrLen(A_Clipboard))
+    }
+    if (StrLen(A_Clipboard) = 0) {
+        LogGsave("empty clipboard, exit")
+        TrayTip "second-brain", "Nothing to save (empty)", 0x2
+        SetTimer () => TrayTip(), -3000
+        return
+    }
+    preview := SubStr(A_Clipboard, 1, 80)
+    if (StrLen(A_Clipboard) > 80)
+        preview .= "..."
+    exitCode := RunWait('powershell.exe -NoLogo -Command "gsave"', , "Hide")
+    LogGsave("powershell exit=" . exitCode)
+    TrayTip "second-brain inbox", preview, 0x1
+    SetTimer () => TrayTip(), -3000
+}
 
 ; --- 单键功能 ---
 

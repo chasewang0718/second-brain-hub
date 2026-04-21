@@ -9,14 +9,14 @@
         2. 对每个 proposal:
             a. 如果 Tier B 目标已有同名文件, 加 -01 后缀
             b. 移 PDF: 99-inbox -> tier_b_dir
-            c. 生成 frontmatter + 摘要 Markdown, 写到 D:\brain\<tier_a_dir>\<slug>.md
+            c. 生成 frontmatter + 摘要 Markdown, 写到 D:\second-brain-content\<tier_a_dir>\<slug>.md
             d. 写 sha256 + 实际 size
-        3. 本轮全部 apply 完, git add/commit to D:\brain (一次 commit)
+        3. 本轮全部 apply 完, git add/commit to D:\second-brain-content (一次 commit)
         4. 成功的 proposal 移到 _migration/ollama-output/applied/
         5. 失败的留在原位置, 记录到 apply-fail.tsv
 
 .PARAMETER ProposalDir
-    默认 D:\brain-assets\_migration\ollama-output
+    默认 D:\second-brain-assets\_migration\ollama-output
 
 .PARAMETER MaxItems
     最多 apply N 份, 默认 0=全部
@@ -36,7 +36,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$ProposalDir = "D:\brain-assets\_migration\ollama-output",
+    [string]$ProposalDir = "",
     [int]$MaxItems = 0,
     [switch]$DryRun,
     [bool]$SkipRejected = $true,
@@ -47,8 +47,45 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$BRAIN = "D:\brain"
-$ASSETS = "D:\brain-assets"
+# 配置加载 (优先读 config/*.yaml; 失败则回退硬编码默认值)
+$HUB_ROOT = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)  # second-brain-hub/
+$configLoader = Join-Path $HUB_ROOT "tools\lib\config-loader.ps1"
+if (Test-Path $configLoader) {
+    . $configLoader
+}
+$telemetryLib = Join-Path $HUB_ROOT "tools\lib\telemetry.ps1"
+if (Test-Path $telemetryLib) {
+    . $telemetryLib
+}
+
+function Get-ConfigOrDefault {
+    param(
+        [string]$File,
+        [string]$Key,
+        $DefaultValue
+    )
+    if (Get-Command Get-BrainConfig -ErrorAction SilentlyContinue) {
+        try { return (Get-BrainConfig -File $File -Key $Key) } catch {}
+    }
+    return $DefaultValue
+}
+
+function Write-TelemetrySafe {
+    param([hashtable]$Entry)
+    if (-not (Get-Command Write-Telemetry -ErrorAction SilentlyContinue)) {
+        return
+    }
+    try {
+        [void](Write-Telemetry -Entry $Entry)
+    } catch {}
+}
+
+$BRAIN = Get-ConfigOrDefault -File "paths" -Key "paths.brain_root" -DefaultValue "D:\second-brain-content"
+$ASSETS = Get-ConfigOrDefault -File "paths" -Key "paths.brain_assets_root" -DefaultValue "D:\second-brain-assets"
+if ([string]::IsNullOrWhiteSpace($ProposalDir)) {
+    $ProposalDir = Get-ConfigOrDefault -File "paths" -Key "paths.ollama_output_dir" -DefaultValue "D:\second-brain-assets\_migration\ollama-output"
+}
+$LowConfThreshold = [double](Get-ConfigOrDefault -File "thresholds" -Key "pdf.confidence_below" -DefaultValue 0.7)
 
 if (-not (Test-Path $ProposalDir)) { throw "proposal 目录不存在: $ProposalDir" }
 $appliedDir = Join-Path $ProposalDir "applied"
@@ -166,15 +203,54 @@ foreach ($pFile in $proposals) {
     if ($SkipRejected -and $rejectedShas.ContainsKey($prop.sha12) -and $rejectedShas[$prop.sha12] -eq 'reject') {
         Write-Host "  skip reject: $($prop.source_filename)" -ForegroundColor DarkYellow
         $stats.SKIP_REJECT++
+        Write-TelemetrySafe -Entry @{
+            task         = "pdf-apply"
+            executor     = "rule-based"
+            model        = "rule-only"
+            duration_ms  = 1
+            schema_valid = $true
+            escalated    = $false
+            source       = $prop.source_fullpath
+            source_hash  = $prop.sha12
+            category     = $c.category
+            confidence   = $c.confidence
+            retry_reason = "skip-reject"
+        }
         continue
     }
     if ($SkipNeedsFix -and $rejectedShas.ContainsKey($prop.sha12) -and $rejectedShas[$prop.sha12] -eq 'needs-fix') {
         $stats.SKIP_NEEDS_FIX++
+        Write-TelemetrySafe -Entry @{
+            task         = "pdf-apply"
+            executor     = "rule-based"
+            model        = "rule-only"
+            duration_ms  = 1
+            schema_valid = $true
+            escalated    = $false
+            source       = $prop.source_fullpath
+            source_hash  = $prop.sha12
+            category     = $c.category
+            confidence   = $c.confidence
+            retry_reason = "skip-needs-fix"
+        }
         continue
     }
     # 过滤: 低置信
-    if ($c.confidence -lt 0.7 -and -not $IncludeLowConf) {
+    if ($c.confidence -lt $LowConfThreshold -and -not $IncludeLowConf) {
         $stats.SKIP_LOW_CONF++
+        Write-TelemetrySafe -Entry @{
+            task         = "pdf-apply"
+            executor     = "rule-based"
+            model        = "rule-only"
+            duration_ms  = 1
+            schema_valid = $true
+            escalated    = $false
+            source       = $prop.source_fullpath
+            source_hash  = $prop.sha12
+            category     = $c.category
+            confidence   = $c.confidence
+            retry_reason = "skip-low-confidence"
+        }
         continue
     }
 
@@ -183,6 +259,17 @@ foreach ($pFile in $proposals) {
         Write-Host "  [X] 源文件不在: $src" -ForegroundColor Red
         if (-not $DryRun) {
             "$($prop.sha12)`t$($prop.source_filename)`tno-source`t$(Get-Date -Format o)" | Add-Content $applyFailTsv -Encoding UTF8
+            Write-TelemetrySafe -Entry @{
+                task         = "pdf-apply"
+                executor     = "rule-based"
+                model        = "rule-only"
+                duration_ms  = 1
+                schema_valid = $false
+                escalated    = $false
+                source       = $src
+                source_hash  = $prop.sha12
+                retry_reason = "no-source"
+            }
         }
         $stats.SKIP_NO_SOURCE++
         continue
@@ -218,6 +305,17 @@ foreach ($pFile in $proposals) {
         Write-Host "    [X] 移动失败: $_" -ForegroundColor Red
         "$($prop.sha12)`t$($prop.source_filename)`tmove-fail: $_`t$(Get-Date -Format o)" | Add-Content $applyFailTsv -Encoding UTF8
         $stats.FAIL++
+        Write-TelemetrySafe -Entry @{
+            task         = "pdf-apply"
+            executor     = "rule-based"
+            model        = "rule-only"
+            duration_ms  = 1
+            schema_valid = $false
+            escalated    = $false
+            source       = $src
+            source_hash  = $prop.sha12
+            retry_reason = "move-fail"
+        }
         continue
     }
 
@@ -234,6 +332,19 @@ foreach ($pFile in $proposals) {
     Move-Item -LiteralPath $pFile.FullName -Destination (Join-Path $appliedDir $pFile.Name) -Force
 
     $stats.APPLIED++
+    Write-TelemetrySafe -Entry @{
+        task           = "pdf-apply"
+        executor       = "rule-based"
+        model          = "rule-only"
+        duration_ms    = 1
+        schema_valid   = $true
+        escalated      = $false
+        source         = $pdfTarget.Path
+        source_hash    = $actualHash
+        category       = $c.category
+        confidence     = $c.confidence
+        output_summary = $c.summary_zh
+    }
 }
 
 Write-Host ""
@@ -247,7 +358,7 @@ Write-Host ("  fail:          {0}" -f $stats.FAIL)
 
 if (-not $DryRun -and -not $NoGitCommit -and $stats.APPLIED -gt 0) {
     Write-Host ""
-    Write-Host "Git commit to D:\brain ..." -ForegroundColor Yellow
+    Write-Host "Git commit to D:\second-brain-content ..." -ForegroundColor Yellow
     Push-Location $BRAIN
     try {
         git add . | Out-Null

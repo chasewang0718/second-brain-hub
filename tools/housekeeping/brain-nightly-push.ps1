@@ -1,21 +1,21 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
-    每晚 22:00 自动把 D:\brain 和 second-brain-hub 的本地 commit 推到 GitHub.
+    每晚 22:00 自动把 D:\second-brain-content 和 second-brain-hub 的本地 commit 推到 GitHub.
 
 .DESCRIPTION
     安全策略:
     - 只 push, 不 commit (commit 由人 / agent 主动触发)
     - 只 push 当前分支, 不 --force
     - 无未推送 commit 就静默跳过
-    - 日志写到 D:\brain\.brain-nightly-push.log (.gitignore 已忽略)
+    - 日志写到 D:\second-brain-content\.brain-nightly-push.log (.gitignore 已忽略)
 #>
 
 [CmdletBinding()]
 param()
 
 $ErrorActionPreference = 'Continue'
-$logPath = "D:\brain\.brain-nightly-push.log"
+$logPath = "D:\second-brain-content\.brain-nightly-push.log"
 $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
 function Log($line) {
@@ -51,7 +51,7 @@ function Push-Repo($repoPath) {
 }
 
 Log "==== brain nightly push ===="
-Push-Repo "D:\brain"
+Push-Repo "D:\second-brain-content"
 Push-Repo "C:\dev-projects\second-brain-hub"
 Log "==== done ===="
 Log ""

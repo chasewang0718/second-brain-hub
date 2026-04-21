@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    扫描 / 迁移外部资产到 D:\brain-assets\.
+    扫描 / 迁移外部资产到 D:\second-brain-assets\.
 
 .DESCRIPTION
     三个模式:
@@ -23,7 +23,7 @@
       .m4a/.mp3/.wav/.flac/.ogg     → 13-audio/           (flat)
       .ttf/.otf/.woff/.woff2        → 11-fonts/           (flat)
       .zip/.rar/.7z/.tar.gz         → 14-archives/        (flat)
-      .txt/.md/.rtf/.log<small>     → brain-inbox         (进 D:\brain\99-inbox\)
+      .txt/.md/.rtf/.log<small>     → brain-inbox         (进 D:\second-brain-content\99-inbox\)
       .pdf                          → 99-inbox/           (Phase 2.3 AI 处理)
       .tex                          → brain-inbox (走 Tier A)
       .aux/.aae/.DS_Store/Thumbs.db → trash (标为删除, 不自动执行)
@@ -50,7 +50,7 @@
 
 .EXAMPLE
     # Review manifest 后 execute
-    .\brain-asset-migrate.ps1 -Execute -ManifestPath D:\brain-assets\_migration\baidu-2026-04-manifest.tsv
+    .\brain-asset-migrate.ps1 -Execute -ManifestPath D:\second-brain-assets\_migration\baidu-2026-04-manifest.tsv
 #>
 
 [CmdletBinding()]
@@ -78,8 +78,8 @@ param(
 # ============================================================
 # 配置
 # ============================================================
-$ASSETS_ROOT = "D:\brain-assets"
-$BRAIN_ROOT  = "D:\brain"
+$ASSETS_ROOT = "D:\second-brain-assets"
+$BRAIN_ROOT  = "D:\second-brain-content"
 $MIGRATION_DIR = Join-Path $ASSETS_ROOT "_migration"
 $EXCLUDE_FILE = "$env:USERPROFILE\.brain-exclude.txt"
 

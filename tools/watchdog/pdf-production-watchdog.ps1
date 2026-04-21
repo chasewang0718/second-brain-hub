@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     Watchdog for `brain-asset-pdf-pipeline.ps1 -Production`.
@@ -18,7 +18,7 @@
         - Log 出现 "^完成\." → 视为成功, 发 done toast, 退出 watchdog
 
 .PARAMETER PidFile
-    pipeline 的 PID 文件, 默认 D:\brain-assets\_migration\ollama-production.pid
+    pipeline 的 PID 文件, 默认 D:\second-brain-assets\_migration\ollama-production.pid
 
 .PARAMETER MaxRestarts
     最多自动重启次数, 默认 3
@@ -39,11 +39,11 @@
 
 [CmdletBinding()]
 param(
-    [string]$PidFile = 'D:\brain-assets\_migration\ollama-production.pid',
+    [string]$PidFile = 'D:\second-brain-assets\_migration\ollama-production.pid',
     [int]$MaxRestarts = 3,
     [int]$StallMinutes = 5,
     [int]$CheckIntervalSec = 60,
-    [string]$WatchdogDir = 'D:\brain-assets\_migration\_watchdog',
+    [string]$WatchdogDir = 'D:\second-brain-assets\_migration\_watchdog',
     [string]$PipelineScript = 'C:\dev-projects\second-brain-hub\tools\ollama-pipeline\brain-asset-pdf-pipeline.ps1'
 )
 
@@ -91,8 +91,8 @@ function Get-Progress {
 function Restart-Pipeline {
     Write-WdLog "自动重启 pipeline -Production ..." Yellow
     $ts = Get-Date -Format yyyyMMdd-HHmmss
-    $newStdout = "D:\brain-assets\_migration\ollama-production-$ts.log"
-    $newStderr = "D:\brain-assets\_migration\ollama-production-$ts.err"
+    $newStdout = "D:\second-brain-assets\_migration\ollama-production-$ts.log"
+    $newStderr = "D:\second-brain-assets\_migration\ollama-production-$ts.err"
     $proc = Start-Process powershell.exe `
         -ArgumentList @(
             '-NoProfile','-ExecutionPolicy','Bypass',

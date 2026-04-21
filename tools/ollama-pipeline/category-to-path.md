@@ -9,8 +9,8 @@ updated: 2026-04-19
 本地模型输出的 `category` 字段决定 Tier A 指针卡和 Tier B 原文件的去向.
 
 说明:
-- Tier A = `D:\brain\` 下 (Markdown 指针卡, 进 git)
-- Tier B = `D:\brain-assets\` 下 (PDF 原文件, 不进 git)
+- Tier A = `D:\second-brain-content\` 下 (Markdown 指针卡, 进 git)
+- Tier B = `D:\second-brain-assets\` 下 (PDF 原文件, 不进 git)
 - 两边目录大多对称, 少数例外 (如 book 类 Tier A 简短 Tier B 大块分散)
 
 ## 映射表

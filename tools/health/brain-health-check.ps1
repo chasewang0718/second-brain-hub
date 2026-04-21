@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    扫 D:\brain 找健康问题: 断链 / 孤儿 / frontmatter 不规范 / 失效 asset_path.
+    扫 D:\second-brain-content 找健康问题: 断链 / 孤儿 / frontmatter 不规范 / 失效 asset_path.
 
 .DESCRIPTION
     检查 5 类问题:
@@ -16,7 +16,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$BrainRoot = "D:\brain"
+    [string]$BrainRoot = "D:\second-brain-content"
 )
 
 $today = Get-Date -Format "yyyy-MM-dd"

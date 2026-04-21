@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     Telemetry 日志分析 - 出成本/准确率/升云率报告.
