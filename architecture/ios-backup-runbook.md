@@ -9,3 +9,7 @@
 3. **记下备份路径**  
    Windows 通常在 `%USERPROFILE%\Apple\Mobile Sync\Backup\<UDID>`（或 `%LOCALAPPDATA%\Apple Computer\MobileSync\Backup\<UDID>`）。  
    在同一台 PC 上用 hub：`brain backup-ios-locate` → `brain contacts-ingest-ios --dry-run` → `brain whatsapp-ingest-ios --dry-run` 确认能找到 `AddressBook.sqlitedb` / `ChatStorage.sqlite` 后再去掉 `--dry-run`。
+
+## 附录 · 与本仓 dry-run 脚本对齐
+
+在同一环境也可执行 `tools/py/scripts/verify_ingest_dry_run.py`（`PYTHONPATH=src`，可选环境变量 `VERIFY_WECHAT_DECODER`）一次输出 **iOS 备份定位结果** 与 optional **微信 decoder dry-run**，便于归档或 agent 巡检。

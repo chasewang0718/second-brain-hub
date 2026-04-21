@@ -399,10 +399,10 @@ Monica/Dex 式人际关系助手.
 | 能力 | CLI / 入口 |
 |---|---|
 | 查询联系人 / 逾期 / 会前上下文 | `brain who`, `brain overdue`（可选 `--channel wechat` 等）, `brain context-for-meeting`（`--since-days`、`--format md`） |
-| 同上（MCP） | `who_tool`, `overdue_tool`（`channel`）, `context_for_meeting_tool`（`since_days` / `output_format`）, `merge_candidates_list_tool`, `merge_candidate_*_tool`, `cloud_flush_preview`, `identifiers_repair_preview`（`brain_mcp/server.py`） |
+| 同上（MCP） | `who_tool`, `overdue_tool`, `context_for_meeting_tool`, `merge_candidates_*`, `cloud_flush_preview`, `identifiers_repair_preview`, `cloud_queue_list_tool`, `ios_backup_locate_preview`, `wechat_sync_preview`（`brain_mcp/server.py`） |
 | T3 合并候选（手动审） | `brain merge-candidates list`, `accept <id> [--keep PID]`, `reject <id>` |
 | 微信 decoder 导入 | `brain wechat-sync [--dry-run]` |
-| iPhone 备份定位 / 通讯录 / WhatsApp | `brain backup-ios-locate`, `brain contacts-ingest-ios`, `brain whatsapp-ingest-ios`（参见 `architecture/ios-backup-runbook.md`） |
+| iPhone 备份定位 / 通讯录 / WhatsApp | `brain backup-ios-locate`, `brain contacts-ingest-ios`, `brain whatsapp-ingest-ios`（参见 `architecture/ios-backup-runbook.md`）；与本机备份 quick check：`tools/py/scripts/verify_ingest_dry_run.py` |
 | 本地模型做不了的条目 | `brain cloud queue list` → `brain cloud flush`（写锁 + cursor-agent；日志在 Tier A 根 `.brain-cloud-flush-last.log`） |
 | Caps+D 文本 inbox | `brain text-inbox-ingest`；归档后自动跑实体抽取 + `[people-note: 姓名]` → `person_notes` / `cloud_queue` |
 
@@ -490,6 +490,7 @@ Monica/Dex 式人际关系助手.
 | 2026-04-21 | — | **MCP**: people / merge-candidates 工具与 CLI 对齐（channel、since_days、md、T3 accept/reject）。 |
 | 2026-04-21 | — | **identifiers-repair**: `--kinds phone|email|wxid|all`；email+gmail_addr、wxid 存量大小写归一（T3 冲突语义与 phone 一致）。 |
 | 2026-04-21 | — | **Cloud flush / D3**: MCP `cloud_flush_preview` + `identifiers_repair_preview`；pytest `test_cloud_flush.py`；`parse_identifiers_repair_kinds` 供 CLI/MCP 共用。 |
+| 2026-04-21 | — | **Dry-run ingest**: `tools/py/scripts/verify_ingest_dry_run.py`（可选 `VERIFY_WECHAT_DECODER`）；MCP `cloud_queue_list_tool`、`ios_backup_locate_preview`、`wechat_sync_preview`。 |
 
 ---
 

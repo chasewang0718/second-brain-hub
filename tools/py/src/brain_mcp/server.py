@@ -8,7 +8,9 @@ from fastmcp import FastMCP
 
 from brain_agents.ask import ask as ask_agent
 from brain_agents.cloud_flush import flush as cloud_flush_run
+from brain_agents.cloud_queue import list_pending as cloud_queue_list_pending
 from brain_agents.identity_resolver import parse_identifiers_repair_kinds, run_identifiers_repair
+from brain_agents.ios_backup_locator import locate_bundle as ios_backup_locate_bundle
 from brain_agents.merge_candidates import accept_candidate, list_candidates, reject_candidate
 from brain_agents.people import context_for_meeting, context_for_meeting_markdown, overdue, who
 from brain_core.config import load_paths_config
@@ -135,6 +137,33 @@ def identifiers_repair_preview(kinds: str = "phone") -> dict:
     if not parsed.get("ok"):
         return parsed
     return run_identifiers_repair(kinds=parsed["kinds"], dry_run=True)
+
+
+@mcp.tool
+def cloud_queue_list_tool(limit: int = 50) -> list[dict]:
+    """Read-only pending cloud_queue rows (same data as ``brain cloud queue list``)."""
+    rows = cloud_queue_list_pending(limit=min(max(1, limit), 500))
+    return json.loads(json.dumps(rows, ensure_ascii=False, default=str))
+
+
+@mcp.tool
+def ios_backup_locate_preview() -> dict:
+    """Resolve ChatStorage.sqlite / AddressBook.sqlitedb from latest iTunes backup folder if present."""
+    loc = ios_backup_locate_bundle()
+    return json.loads(json.dumps(loc, ensure_ascii=False, default=str))
+
+
+@mcp.tool
+def wechat_sync_preview(decoder_dir: str = r"C:\dev-projects\wechat-decoder") -> dict:
+    """Dry-run WeChat contacts + chat JSON ingest plan (no DuckDB writes). Requires decoder tree on disk."""
+    from pathlib import Path
+
+    from brain_agents.wechat_sync import sync_from_cli
+
+    root = Path(decoder_dir).expanduser()
+    if not root.is_dir():
+        return {"status": "skipped", "reason": "decoder_root_missing", "path": str(root)}
+    return sync_from_cli(str(root), dry_run=True)
 
 
 def run_stdio() -> None:
