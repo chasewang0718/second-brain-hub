@@ -172,6 +172,26 @@ def repair_wxid_identifiers(*, dry_run: bool = False) -> dict[str, Any]:
     return _repair_identifier_kind_group(("wxid",), dry_run=dry_run, reason_prefix="wxid")
 
 
+def parse_identifiers_repair_kinds(kinds_str: str) -> dict[str, Any]:
+    """
+    Parse CLI / MCP ``--kinds`` string.
+
+    Returns ``{"ok": True, "kinds": set(...)}`` or ``{"ok": False, "reason": "bad_kind", "value": ...}``.
+    """
+    raw = kinds_str.strip().lower().replace(" ", "")
+    if raw == "all":
+        return {"ok": True, "kinds": {"phone", "email", "wxid"}}
+    req: set[str] = set()
+    for part in (p.strip() for p in raw.split(",") if p.strip()):
+        if part in ("phone", "email", "wxid"):
+            req.add(part)
+        else:
+            return {"ok": False, "reason": "bad_kind", "value": part}
+    if not req:
+        req.add("phone")
+    return {"ok": True, "kinds": req}
+
+
 def run_identifiers_repair(*, kinds: set[str], dry_run: bool = False) -> dict[str, Any]:
     """
     Run repair for requested kind groups: phone, email (includes gmail_addr), wxid.

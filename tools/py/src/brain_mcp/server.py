@@ -7,6 +7,8 @@ import json
 from fastmcp import FastMCP
 
 from brain_agents.ask import ask as ask_agent
+from brain_agents.cloud_flush import flush as cloud_flush_run
+from brain_agents.identity_resolver import parse_identifiers_repair_kinds, run_identifiers_repair
 from brain_agents.merge_candidates import accept_candidate, list_candidates, reject_candidate
 from brain_agents.people import context_for_meeting, context_for_meeting_markdown, overdue, who
 from brain_core.config import load_paths_config
@@ -118,6 +120,21 @@ def merge_candidate_accept_tool(candidate_id: int, kept_person_id: str = "") -> 
 def merge_candidate_reject_tool(candidate_id: int) -> dict:
     """Reject a pending merge_candidates row without merging."""
     return reject_candidate(candidate_id)
+
+
+@mcp.tool
+def cloud_flush_preview() -> dict:
+    """Same as ``brain cloud flush --dry-run``: build prompt stats without spawning cursor-agent."""
+    return cloud_flush_run(dry_run=True)
+
+
+@mcp.tool
+def identifiers_repair_preview(kinds: str = "phone") -> dict:
+    """Dry-run identifiers repair; kinds: phone, email, wxid, comma list, or all."""
+    parsed = parse_identifiers_repair_kinds(kinds)
+    if not parsed.get("ok"):
+        return parsed
+    return run_identifiers_repair(kinds=parsed["kinds"], dry_run=True)
 
 
 def run_stdio() -> None:

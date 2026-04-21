@@ -311,24 +311,13 @@ def identifiers_repair_cmd(
         help="Comma-separated: phone, email, wxid, or all (default: phone). Email includes gmail_addr.",
     ),
 ) -> None:
-    from brain_agents.identity_resolver import run_identifiers_repair
+    from brain_agents.identity_resolver import parse_identifiers_repair_kinds, run_identifiers_repair
 
-    raw = kinds.strip().lower().replace(" ", "")
-    if raw == "all":
-        req = {"phone", "email", "wxid"}
-    else:
-        req = set()
-        for part in (p.strip() for p in raw.split(",") if p.strip()):
-            if part in ("phone", "email", "wxid"):
-                req.add(part)
-            else:
-                typer.echo(
-                    json.dumps({"status": "error", "reason": "bad_kind", "value": part}, ensure_ascii=False, indent=2)
-                )
-                raise typer.Exit(code=1)
-        if not req:
-            req.add("phone")
-    rep = run_identifiers_repair(kinds=req, dry_run=dry_run)
+    parsed = parse_identifiers_repair_kinds(kinds)
+    if not parsed.get("ok"):
+        typer.echo(json.dumps({"status": "error", **{k: v for k, v in parsed.items() if k != "ok"}}, ensure_ascii=False, indent=2))
+        raise typer.Exit(code=1)
+    rep = run_identifiers_repair(kinds=parsed["kinds"], dry_run=dry_run)
     if rep.get("status") == "error":
         raise typer.Exit(code=1)
     typer.echo(json.dumps(rep, ensure_ascii=False, indent=2, default=str))

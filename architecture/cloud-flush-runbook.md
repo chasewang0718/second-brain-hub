@@ -53,6 +53,18 @@ python -m brain_cli.main cloud flush
 - [ ] `.brain-cloud-flush-last.log` 存在且大小 > 0
 - [ ] 处理完后 `cloud_queue` 中 `status = done` 的条目有增加（或维持，若 agent 故意留着等人工复核）
 
+## 自动化（CI / 本地 pytest）
+
+在 `tools/py` 下（`PYTHONPATH=src` 已由 `pyproject` 的 pytest 配置注入）：
+
+```powershell
+python -m pytest tests/test_cloud_flush.py -q
+```
+
+`test_flush_dry_run_includes_tasks_when_queue_non_empty` 会入队一条 `capsd-note-hard` 占位的 pending 行，再跑 `flush(dry_run=True)`。若本机**没有** `cursor-agent`，应得到 `status=skipped` 且 `reason=cursor_agent_missing`，但 `overview` 里仍应含该条任务；若有 agent 可执行，则 `status=dry_run` 且 `prompt_chars` > 0。测后**删除**该测试行，不污染你的待办队列。
+
+MCP 侧可用 `cloud_flush_preview` 做与 `brain cloud flush --dry-run` 等价的只读检查（不 spawn 进程）。
+
 ## 故障排查
 
 | 现象 | 说明 / 处置 |
