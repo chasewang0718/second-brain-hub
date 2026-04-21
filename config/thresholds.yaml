@@ -2,7 +2,54 @@
 # 说明: 本文件只放阈值/预算, 不放路径.
 
 schema_version: "1.0"
-updated: "2026-04-20"
+updated: "2026-04-21"
+
+# text-inbox: brain text-inbox-ingest（阈值与路由关键词；默认值与 Phase A2 代码一致）
+text_inbox:
+  confidence:
+    promote_min: 0.7
+    empty_keyword_score: 0.35
+    base: 0.45
+    per_keyword_hit: 0.15
+    cap: 0.95
+  paths:
+    draft_route: "99-inbox/_draft"
+    default_unclassified_route: "99-inbox/_draft"
+  filename:
+    slug_max_length: 60
+    first_line_fallback: "inbox note"
+    # 若为 true，优先用 frontmatter 中 title_keys 生成 slug（无则仍用正文首行）
+    prefer_frontmatter_title: false
+    frontmatter_title_keys:
+      - title
+      - subject
+  route_keywords:
+    "01-concepts/inbox-auto":
+      - concept
+      - principle
+      - framework
+      - 定义
+      - 原理
+    "03-projects/inbox-auto":
+      - project
+      - roadmap
+      - milestone
+      - todo
+      - 需求
+    "04-journal":
+      - today
+      - journal
+      - reflection
+      - 复盘
+      - 感受
+  pii_patterns:
+    bsn_like: "\\b\\d{9}\\b"
+    iban_like: "\\b[A-Z]{2}\\d{2}[A-Z0-9]{10,30}\\b"
+    email: "\\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}\\b"
+    phone_like: "\\b(?:\\+?\\d[\\d\\s-]{8,}\\d)\\b"
+  # 预留：启用后可用 FM 的 tags/title 参与路由加分（默认关闭，行为与旧版一致）
+  frontmatter_routing:
+    enabled: false
 
 pdf:
   confidence_below: 0.70
