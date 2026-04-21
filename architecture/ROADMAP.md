@@ -293,11 +293,12 @@ Caps+D 贴任何文本 → 零操作归档.
   - 视频: 关键帧抽取 + LLaVA + 音轨
 - [ ] 统一 dispatcher (替代 PS task-router 手工实现)
 - [ ] 失败入 `_cursor_queue/`
-- [ ] **弃用 PS 脚本**:
-  - [ ] 删除 `tools/ollama-pipeline/*.ps1`
-  - [ ] 删除 `tools/lib/config-loader.ps1` / `telemetry.ps1`
-  - [ ] 删除 `tools/feedback/harvest-feedback.ps1`
-  - [ ] 保留 `tools/ahk/` + `tools/watchdog/` (入口和监控)
+- [x] **弃用 PS 脚本** (2026-04-21 完成):
+  - [x] 删除 `tools/ollama-pipeline/*.ps1`（6 个 + `category-to-path.md`）
+  - [x] 删除 `tools/lib/config-loader.ps1` / `telemetry.ps1` / `wait-for-batch.ps1`
+  - [x] 删除 `tools/feedback/harvest-feedback.ps1`
+  - [x] 删除 `tools/watchdog/pdf-production-watchdog.ps1`（依赖已删除的 pipeline）
+  - [x] 保留 `tools/ahk/` + `tools/watchdog/notify.ps1`（通用通知库, 供未来 watchdog 复用）
 
 **退出标志**:
 - 10 种格式文件丢 inbox 全部正确归档
@@ -497,6 +498,7 @@ Monica/Dex 式人际关系助手.
 | 2026-04-21 | — | **A4 provenance**: `write_assist` 输出尾部自动追加 `## 参考` 块（按序引用 `sources`），并在 `provenance` 字段补 `kind`（pdf/image/audio/person-note/journal/note）+ 指针卡 `asset_sha256 / asset_type / person_id / ocr_status / asr_status`（来自目标文件 frontmatter）；新增 `include_provenance=False` 旁路；`test_write_provenance.py` 6 用例（全量 52 个）。 |
 | 2026-04-21 | — | **F3 Kuzu 只读 POC**: `brain_agents/graph_build.py` + `brain_agents/graph_query.py`；CLI `brain graph-build/graph-stats/graph-fof/graph-shared-identifier`；Kuzu 作为 DuckDB 派生视图（全量重建 ~7s），POC 实测 FoF 29ms / shared-identifier 22ms / stats 26ms @ 75 人（< 1s 目标达标）；5 个 pytest 用例以 `importorskip("kuzu")` 保护；详见 `architecture/stage3-f3-kuzu-poc.md`（全量 57 个）。 |
 | 2026-04-21 | — | **E1 周期维护**: 新增 `tools/housekeeping/brain-weekly-maintenance.ps1` + `register-brain-weekly-maintenance.ps1`（每周日 23:00，跑 `identifiers-repair --kinds all` / `cloud flush --dry-run` / `graph-build`，均只读或幂等；日志写 `_runtime/logs/brain-weekly-maintenance-YYYYMMDD.log`；runbook 见 `architecture/e1-weekly-maintenance-runbook.md`）。 |
+| 2026-04-21 | — | **A3 收尾 · 弃用 PS 脚本**: 删除 12 个 (~105KB) 老 PS 脚本——整个 `tools/ollama-pipeline/`（6 + 配置 md）、`tools/lib/`（config-loader / telemetry / wait-for-batch）、`tools/feedback/harvest-feedback.ps1`、`tools/watchdog/pdf-production-watchdog.ps1`。全部已被 `brain_agents/file_inbox.py` + `image_inbox.py` + `audio_inbox.py` + `cloud_queue.py` 覆盖；保留 `notify.ps1`（通用通知库）。`tools/README.md` 更新子目录说明。 |
 
 ---
 
