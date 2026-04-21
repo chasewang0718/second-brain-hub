@@ -118,6 +118,15 @@ manifest 的 `source_path + rule + target_dir` 列。
 - [x] B4 完成（source-cleanup Python 版 3b260dc，默认 dry-run 安全升级）
 - [x] E2 完成（对拍工具 + runbook，见 `asset-parity-runbook.md`）
 - [ ] 3 次对拍（间隔 ≥ 1 周，覆盖 ≥ 2 个源目录）全部通过或只有可接受差异
+  - [x] **Pass 1 / 3** · 2026-04-21 · `D:\BaiduSyncdisk\20250922.手机照片` ·
+        839 文件，824 完全一致，15 差异全部是 Python > PS（PNG 真 EXIF 对
+        iPhone 截图生效，PS 的 `System.Drawing` 只对 JPEG 稳读），0 退化。
+        归档 `D:\second-brain-assets\_migration\parity-archive\parity-2026-04-21.*`。
+        同时修掉 2 个发现的 bug：`load_manifest` 现用 `utf-8-sig` 吃掉 PS
+        `Export-Csv -Encoding UTF8` 的 BOM；`Pillow>=10.4.0` 加入项目依赖
+        （没装时照片全部 fallback 到 mtime 会造成 ~45% 假差异）。
+  - [ ] Pass 2 / 3 · ≥ 2026-04-28 · **另一个源目录**（建议 `D:\BaiduSyncdisk` 根或次子目录）
+  - [ ] Pass 3 / 3 · ≥ 2026-05-05 · 任一源目录
 - [ ] B5 完成（改 `.reference` profile 的 `gasset-*` 调 Python CLI）
 - [ ] B6 完成（删 `tools/asset/*.ps1`）
 - [ ] ROADMAP changelog 加 "A4 收尾 · 弃用 PS asset 脚本" 条目

@@ -14,6 +14,13 @@
 - Python 侧的 `brain asset-scan` 已可用（B3, commit `ad4c2fd`）。
 - PowerShell 侧的 `tools/asset/brain-asset-migrate.ps1` 仍在仓里。
 - 你准备好一个源目录（`D:\BaiduSyncdisk` 或你想扫的任何目录）。
+- **Pillow 已装**。Python 靠 Pillow 读照片的 `DateTimeOriginal`；没装的话
+  所有照片都会回退到 mtime，对拍会出现大量 `target_dir` 月份不一致的伪
+  差异。验证一下：
+  ```powershell
+  python -c "from PIL import Image; print('PIL', Image.__version__)"
+  ```
+  装法：`pip install "pillow>=10.4.0"`（已写进 `tools/py/pyproject.toml`）。
 
 ---
 

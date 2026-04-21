@@ -40,6 +40,54 @@ def test_load_manifest_missing_file_returns_empty(tmp_path: Path):
     assert amp.load_manifest(tmp_path / "nope.tsv") == []
 
 
+def test_load_manifest_strips_utf8_bom_written_by_powershell(tmp_path: Path):
+    """Regression: PowerShell 5.1's ``Export-Csv -Encoding UTF8``
+    prefixes the file with a UTF-8 BOM. Without utf-8-sig, the
+    first header name becomes ``\\ufeffsource_path`` and the
+    join-by-source_path silently finds zero common rows.
+    """
+    p = tmp_path / "ps-like.tsv"
+    # Manually write the file the way PowerShell 5.1 does:
+    # BOM + tab-separated header + one data row.
+    content = (
+        "\ufeff"
+        "source_path\tsize_kb\tmtime\text\trule\taction\ttarget_dir\tnew_name\tdate_source\tnote\n"
+        "D:\\src\\a.jpg\t123.4\t2024-01-15 10:00:00\t.jpg\tphoto\tcopy\t10-photos\\2024-01\ta.jpg\texif\t\n"
+    )
+    p.write_bytes(content.encode("utf-8"))
+
+    rows = amp.load_manifest(p)
+    assert len(rows) == 1
+    # The critical assertion: source_path must be reachable by the
+    # clean name, not the \ufeff-prefixed one.
+    assert rows[0]["source_path"] == "D:\\src\\a.jpg"
+    assert "\ufeffsource_path" not in rows[0]
+    assert rows[0]["rule"] == "photo"
+
+
+def test_load_manifest_parity_with_ps_bom_vs_python_nobom(tmp_path: Path):
+    """End-to-end regression for the bug the user hit: PS writes
+    BOM, Python doesn't, and pre-fix the diff reported zero common
+    rows despite identical content.
+    """
+    ps_like = tmp_path / "ps.tsv"
+    py_like = tmp_path / "py.tsv"
+    header = "source_path\tsize_kb\tmtime\text\trule\taction\ttarget_dir\tnew_name\tdate_source\tnote"
+    body = "D:\\src\\a.jpg\t100\t2024-01-15 10:00:00\t.jpg\tphoto\tcopy\t10-photos\\2024-01\ta.jpg\texif\t"
+    # PS-style: leading BOM
+    ps_like.write_bytes(("\ufeff" + header + "\n" + body + "\n").encode("utf-8"))
+    # Python-style: no BOM
+    py_like.write_bytes((header + "\n" + body + "\n").encode("utf-8"))
+
+    a_rows = amp.load_manifest(ps_like)
+    b_rows = amp.load_manifest(py_like)
+    diff = amp.diff_manifests(a_rows, b_rows)
+    assert diff["match"] is True
+    assert diff["common_count"] == 1
+    assert diff["only_in_a"] == []
+    assert diff["only_in_b"] == []
+
+
 # ---------------------------------------------------------------------------
 # diff_manifests: identical
 # ---------------------------------------------------------------------------

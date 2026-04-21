@@ -51,12 +51,23 @@ def load_manifest(path: Path) -> list[dict[str, str]]:
     """Read a tab-separated manifest. Tolerant to missing columns
     (they show up as empty strings), so a hand-edited or older
     format still loads.
+
+    Uses ``utf-8-sig`` to eat the BOM that PowerShell 5.1's
+    ``Export-Csv -Encoding UTF8`` writes. Without this, the first
+    header would be read as ``\\ufeffsource_path`` and the whole
+    join-by-source_path would silently miss every row.
     """
     if not path.exists():
         return []
-    with path.open("r", encoding="utf-8", newline="") as f:
+    with path.open("r", encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f, dialect="excel-tab")
-        return [{k or "": (v or "") for k, v in row.items()} for row in reader]
+        # Belt-and-braces: also strip any leftover BOM or whitespace
+        # from column names, so a weirdly-encoded hand edit still
+        # parses cleanly.
+        return [
+            {(k or "").lstrip("\ufeff").strip(): (v or "") for k, v in row.items()}
+            for row in reader
+        ]
 
 
 def _index_by_src(rows: list[dict[str, str]]) -> dict[str, dict[str, str]]:
