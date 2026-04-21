@@ -119,13 +119,42 @@ def overdue(days: int = 30, *, channel: str | None = None) -> list[dict[str, Any
     )
 
 
-def _collect_graph_hints(person_id: str, *, limit: int = 5) -> dict[str, Any]:
+_GRAPH_HINTS_MAX_AGE_S = 3600  # 1 hour; keeps hints ≤ one E1 cycle behind
+
+
+def _freshen_graph_if_needed() -> dict[str, Any] | None:
+    """Call ``rebuild_if_stale`` so hints are never more than
+    :data:`_GRAPH_HINTS_MAX_AGE_S` stale versus DuckDB. Returns the
+    rebuild descriptor (for diagnostics), or ``None`` when Kuzu isn't
+    available / building errored — in that case hint collection is
+    already graceful so we just fall through.
+    """
+    try:
+        from brain_agents.graph_build import rebuild_if_stale
+    except Exception:  # pragma: no cover - import guard
+        return None
+    try:
+        return rebuild_if_stale(max_age_seconds=_GRAPH_HINTS_MAX_AGE_S)
+    except Exception:  # pragma: no cover - defensive
+        return None
+
+
+def _collect_graph_hints(person_id: str, *, limit: int = 5, auto_freshen: bool = True) -> dict[str, Any]:
     """Query the Kuzu read-only view for cross-links (F3 POC integration).
+
+    When ``auto_freshen=True`` (default), first runs
+    :func:`rebuild_if_stale` with a 1h max-age so hints stay fresh
+    without waiting for the weekly E1 task. Cost is a few ms of
+    mtime stats when the view is fresh.
 
     Graceful degradation: if Kuzu is not installed or the graph has not
     been built yet, return ``{"status": "skipped", "reason": ...}`` so
     the calling MD renderer can hide the section cleanly.
     """
+    freshen: dict[str, Any] | None = None
+    if auto_freshen:
+        freshen = _freshen_graph_if_needed()
+
     try:
         from brain_agents.graph_query import shared_identifier
     except Exception as exc:  # pragma: no cover - import guard
@@ -136,11 +165,19 @@ def _collect_graph_hints(person_id: str, *, limit: int = 5) -> dict[str, Any]:
         return {"status": "skipped", "reason": str(exc)}
     except Exception as exc:  # pragma: no cover - defensive
         return {"status": "skipped", "reason": f"runtime:{exc.__class__.__name__}"}
-    return {
+
+    out: dict[str, Any] = {
         "status": "ok",
         "shared_identifier": payload.get("results") or [],
         "elapsed_ms": payload.get("elapsed_ms"),
     }
+    if freshen is not None:
+        out["freshen"] = {
+            "status": freshen.get("status"),
+            "rebuilt": bool(freshen.get("rebuilt")),
+            "reason": freshen.get("reason"),
+        }
+    return out
 
 
 def context_for_meeting(
@@ -149,6 +186,7 @@ def context_for_meeting(
     *,
     since_days: int | None = None,
     include_graph_hints: bool = True,
+    auto_freshen_graph: bool = True,
 ) -> dict[str, Any]:
     candidates = who(name_or_alias)
     if not candidates:
@@ -175,7 +213,11 @@ def context_for_meeting(
         """,
         params,
     )
-    graph_hints = _collect_graph_hints(cid, limit=5) if include_graph_hints else None
+    graph_hints = (
+        _collect_graph_hints(cid, limit=5, auto_freshen=auto_freshen_graph)
+        if include_graph_hints
+        else None
+    )
     return {
         "contact": contact,
         "recent_interactions": interactions,

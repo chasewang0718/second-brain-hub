@@ -10,8 +10,25 @@ from __future__ import annotations
 from brain_agents import people
 
 
+def _stub_rebuild_if_stale(monkeypatch, *, counter: dict | None = None):
+    """Replace ``rebuild_if_stale`` so tests don't touch real Kuzu.
+
+    When a ``counter`` dict is passed, its ``n`` key is incremented
+    per call — lets us assert the auto-freshen path fired.
+    """
+    from brain_agents import graph_build
+
+    def fake(**kwargs):
+        if counter is not None:
+            counter["n"] = counter.get("n", 0) + 1
+        return {"status": "ok", "rebuilt": False, "staleness": {"stale": False, "reason": "fresh"}}
+
+    monkeypatch.setattr(graph_build, "rebuild_if_stale", fake)
+
+
 def _monkeypatch_shared_identifier(monkeypatch, rows):
     """Replace the lazy import target inside ``_collect_graph_hints``."""
+    _stub_rebuild_if_stale(monkeypatch)
 
     def fake_shared_identifier(person_id, *, limit=5, kuzu_dir=None):
         return {"anchor": person_id, "count": len(rows), "results": rows, "elapsed_ms": 3.14}
@@ -29,6 +46,8 @@ def _monkeypatch_shared_identifier(monkeypatch, rows):
 def test_graph_hints_skipped_when_module_raises(monkeypatch):
     import sys
     import types
+
+    _stub_rebuild_if_stale(monkeypatch)
 
     def raise_on_query(pid, *, limit=5, kuzu_dir=None):
         raise RuntimeError("kuzu_not_built:/tmp/x")
@@ -74,6 +93,8 @@ def test_context_for_meeting_markdown_hides_section_when_skipped(monkeypatch):
     import sys
     import types
 
+    _stub_rebuild_if_stale(monkeypatch)
+
     def fake_fail(pid, *, limit=5, kuzu_dir=None):
         raise RuntimeError("kuzu_missing:ModuleNotFoundError")
 
@@ -86,6 +107,48 @@ def test_context_for_meeting_markdown_hides_section_when_skipped(monkeypatch):
     assert payload["graph_hints"]["status"] == "skipped"
     md = people.context_for_meeting_markdown(payload)
     assert "潜在同一人线索" not in md  # section hidden when no hits
+
+
+def test_auto_freshen_fires_when_default(monkeypatch):
+    """Default auto_freshen=True must call rebuild_if_stale once per hint."""
+    counter: dict = {"n": 0}
+    _stub_rebuild_if_stale(monkeypatch, counter=counter)
+
+    import sys
+    import types
+
+    def fake_shared_identifier(person_id, *, limit=5, kuzu_dir=None):
+        return {"results": [], "elapsed_ms": 0.1}
+
+    fake_mod = types.ModuleType("brain_agents.graph_query")
+    fake_mod.shared_identifier = fake_shared_identifier  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "brain_agents.graph_query", fake_mod)
+
+    out = people._collect_graph_hints("p_alice")
+    assert counter["n"] == 1
+    assert out["status"] == "ok"
+    assert out["freshen"]["status"] == "ok"
+    assert out["freshen"]["rebuilt"] is False
+
+
+def test_auto_freshen_skippable(monkeypatch):
+    """auto_freshen=False must NOT call rebuild_if_stale."""
+    counter: dict = {"n": 0}
+    _stub_rebuild_if_stale(monkeypatch, counter=counter)
+
+    import sys
+    import types
+
+    def fake_shared_identifier(person_id, *, limit=5, kuzu_dir=None):
+        return {"results": [], "elapsed_ms": 0.1}
+
+    fake_mod = types.ModuleType("brain_agents.graph_query")
+    fake_mod.shared_identifier = fake_shared_identifier  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "brain_agents.graph_query", fake_mod)
+
+    out = people._collect_graph_hints("p_alice", auto_freshen=False)
+    assert counter["n"] == 0
+    assert "freshen" not in out
 
 
 def test_include_graph_hints_false_skips_call(monkeypatch):
