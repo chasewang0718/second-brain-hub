@@ -60,7 +60,7 @@ def _llm_generate(
     banned: list[str],
     extra_instruction: str = "",
 ) -> str:
-    model = os.getenv("BRAIN_WRITE_MODEL", "qwen2.5:3b").strip()
+    model = os.getenv("BRAIN_WRITE_MODEL", "qwen2.5:14b-instruct").strip()
     bullets: list[str] = []
     for row in sources[: min(5, len(sources))]:
         prev = str(row.get("preview", ""))[:280]
@@ -97,7 +97,7 @@ def write_draft(
     platform: str,
     reader: str,
     source_limit: int = 5,
-    engine: str = "template",
+    engine: str = "llm",
 ) -> dict[str, Any]:
     cfg = _constraints().get("writing", {})
     style = cfg.get("platform_style", {}).get(platform, cfg.get("platform_style", {}).get("default", {}))

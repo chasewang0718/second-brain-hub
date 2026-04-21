@@ -254,9 +254,9 @@ def write_cmd(
     reader: str = typer.Option("general reader", help="Target reader persona"),
     source_limit: int = typer.Option(5, "--source-limit", "--limit", min=1, max=20),
     engine: str = typer.Option(
-        "template",
+        "llm",
         "--engine",
-        help="template (default) or llm (Ollama; BRAIN_WRITE_MODEL, OLLAMA_HOST)",
+        help="llm (default; Ollama, BRAIN_WRITE_MODEL, OLLAMA_HOST) or template",
     ),
 ) -> None:
     from brain_agents.write_assist import write_draft
