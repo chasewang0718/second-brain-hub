@@ -3,7 +3,7 @@
 # v5 改名: D:\brain → D:\second-brain-content, D:\brain-assets → D:\second-brain-assets
 
 schema_version: "2.0"
-updated: "2026-04-20"
+updated: "2026-04-21"
 
 paths:
   # Tier A / Tier B 根目录
@@ -24,8 +24,8 @@ paths:
   cursor_queue_dir: "D:\\second-brain-assets\\_cursor_queue"
   escalation_dir: "D:\\second-brain-assets\\_escalation"       # 向后兼容, 逐步废弃
 
-  # hub 仓内日志目录
-  telemetry_logs_dir: "C:\\dev-projects\\second-brain-hub\\telemetry\\logs"
+  # Runtime 数据目录 (Tier B, 非 Git)
+  telemetry_logs_dir: "D:\\second-brain-assets\\_runtime\\logs"
 
   # Python 工程
   py_root: "C:\\dev-projects\\second-brain-hub\\tools\\py"

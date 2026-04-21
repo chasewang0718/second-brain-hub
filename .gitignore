@@ -1,6 +1,11 @@
 # Runtime / logs
 telemetry/logs/*.jsonl
 telemetry/logs/*.log
+telemetry/logs/*.duckdb
+telemetry/*.duckdb
+telemetry/*.kuzu
+telemetry/kuzu-memory/
+telemetry/vector-index/
 *.log
 gsave-log.txt
 
