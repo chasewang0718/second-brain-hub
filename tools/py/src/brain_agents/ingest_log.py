@@ -6,7 +6,8 @@ One line per ingest apply (or dry-run, if the caller asks). Lives at::
 
 Schema (required keys)::
 
-    ts_utc          ISO-8601 UTC string
+    ts_utc          ISO-8601 UTC string (event written ≈ ingest end)
+    started_at      ISO-8601 UTC string when known (explicit or derived from ts_utc − elapsed_ms)
     source          "ios_addressbook" | "whatsapp_ios" | "wechat" | ...
     mode            "dry_run" | "apply"
     status          "ok" | "error" | "dry_run" | <module-specific>
@@ -30,7 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -74,6 +75,7 @@ def log_ingest_event(
     stats: dict[str, Any],
     source_path: str | Path | None = None,
     elapsed_ms: float | None = None,
+    started_at_utc: datetime | None = None,
     backup: dict[str, Any] | None = None,
     now: datetime | None = None,
     log_dir: Path | None = None,
@@ -88,8 +90,16 @@ def log_ingest_event(
     sp = Path(source_path) if source_path else None
     sha = _safe_sha256(sp) if mode == "apply" else None
 
+    start_dt: datetime | None = started_at_utc
+    if start_dt is None and elapsed_ms is not None:
+        try:
+            start_dt = ts - timedelta(milliseconds=float(elapsed_ms))
+        except (TypeError, ValueError, OverflowError):
+            start_dt = None
+
     event = {
         "ts_utc": ts.isoformat(timespec="seconds"),
+        "started_at": start_dt.isoformat(timespec="seconds") if start_dt else None,
         "source": str(source),
         "mode": str(mode),
         "status": str(stats.get("status", "unknown")),

@@ -18,7 +18,7 @@ authoritative_at: C:\dev-projects\second-brain-hub\architecture\real-ingest-scop
 前置条件**，一旦蹚错方向会污染 DuckDB / 引出错误的 T3 合并
 候选，代价很高。
 
-本文档**不写任何代码**，只定清楚：
+本文档以范围与验收为主（B-ING-0 相关代码已落在仓库）；这里只定清楚：
 
 1. 每条线到真跑 `--apply` 之间还缺什么
 2. 什么风险必须先兜底
@@ -37,14 +37,13 @@ authoritative_at: C:\dev-projects\second-brain-hub\architecture\real-ingest-scop
 
 ## 公共前置条件（上线任何一条之前都必须具备）
 
-### PC-1 · DuckDB 可回退快照
+### PC-1 · DuckDB 可回退快照 ✅（B-ING-0）
 真跑 `--apply` 之前，**必须**先备一份 `brain-telemetry.duckdb` 到
-`D:\second-brain-assets\_backup\telemetry\YYYYMMDD-HHMM-pre-ingest.duckdb`。
+`_backup/telemetry/<ts>-<label>.duckdb`（sha256 sidecar + pointer-log）。
 理由：ingest 会写 `persons` / `person_identifiers` / `interactions`
 三张表；identity_resolver 可能 T2 自动合并；一旦出错只能整表还原。
 
-**验收**：`brain ingest-backup-now` 存在（**未实现**，需要新增 ~20 行的 CLI
-命令，这也是后面 B-ING-0 批要做的）。
+**实现**：`brain_agents/ingest_backup.py` · CLI `brain ingest-backup-now [--label]`。
 
 ### PC-2 · T3 合并候选阈值演练
 当前 T3 的阈值来自 demo 数据。真实通讯录里会有**大量同姓同名**
@@ -58,20 +57,23 @@ authoritative_at: C:\dev-projects\second-brain-hub\architecture\real-ingest-scop
 **验收**：手工 review 第一批 50 条 `merge_candidates` 全部处理完（`--apply-accept`
 或 `--reject`），才允许吞第二批数据。
 
-### PC-3 · Provenance trail
-每一次 ingest 要在日志里记录：来源路径、快照 sha256、处理了多少行、
-写了多少新 person / 多少新 interaction、用了多少秒。目前 ingest 函数返
-回了 stats dict，但**没有把它写到 `telemetry_logs_dir` 的结构化日志**——
-只是打 print。
+### PC-3 · Provenance trail ✅（B-ING-0）
+每一次 ingest 要在结构化日志里记录：来源路径、快照 sha256、近似开始/结束时刻、
+处理统计、耗时。三条摄取线均在 apply（及可选 dry-run）末尾调用 `log_ingest_event`。
 
-**验收**：`logs/ingest-YYYY-MM-DD.jsonl` 每次 ingest 追加一行，字段包括
-`source`, `source_sha256`, `started_at`, `elapsed_ms`, `persons_added`,
-`interactions_added`, `t3_queued`。
+**实现**：`brain_agents/ingest_log.py` · 默认路径
+`<telemetry_logs_dir>/ingest-YYYY-MM-DD.jsonl` · CLI `brain ingest-log-recent`。
 
-### PC-4 · 回滚预案
-任何一次 apply 之前，`structured.execute` 必须走 `BEGIN TRANSACTION`，
-最外层 try/except 里回滚。当前 ingest 直接 `execute(...)` 无事务包裹。
-这是**真数据上线的硬门槛**，必改。
+**字段**（节选）：`source`, `mode`, `source_path`, `source_sha256`（apply 才有）,
+`started_at`（显式传入或根据 `ts_utc`−`elapsed_ms` 推导）, `elapsed_ms`,
+`persons_added`, `interactions_added`, `t3_queued`, `backup`, `detail`。
+
+### PC-4 · 回滚预案 ✅（B-ING-0）
+三条摄取（AddressBook / WhatsApp iOS / WeChat `sync_all`）在 `--apply` 且未关闭
+`wrap_transaction` 时，写 DuckDB 的路径包在 `brain_memory.structured.transaction()`
+里：失败则 `ROLLBACK`，成功则 `COMMIT`。
+
+**实现**：`brain_memory/structured.py` 的 `transaction()` 上下文（禁止嵌套）。
 
 ## 分条线门槛
 
@@ -141,18 +143,12 @@ authoritative_at: C:\dev-projects\second-brain-hub\architecture\real-ingest-scop
 - ❌ **不**回溯老于 **1 年**的 WeChat/WhatsApp 消息（价值极低、噪音巨大）
 - ❌ **不**在用户不在场时跑任何 `--apply`（本地个人数据，人必须在）
 
-## 为什么现在只写文档、不开工
+## 上线节奏说明
 
-三点原因：
-
-1. **B-ING-0 是代码活**（约 4h），但需要**等用户同意开这一摊**再动
-   （涉及 DuckDB schema 迁移、日志改动，牵连面广）
-2. **B-ING-1 需要真实设备接入**——用户的 iPhone + 一次 iTunes/Finder 备份
-   的现场操作，AI 侧只能准备，不能代行
-3. **T3 阈值调优**（B-ING-2）必须基于用户真实通讯录的分布决定，纸上推演没用
-
-所以**推荐的动作是**：等用户下次说"开 B-ING-0"，就可以从 ingest-backup-now
-CLI + 事务包裹开始。一旦 B-ING-0 合并，B-ING-1 就只欠用户做一次非加密备份。
+1. **B-ING-0 已合并**：PC-1 / PC-3 / PC-4 在代码侧关闭；真跑前仍须手工执行
+   `brain ingest-backup-now` 与人工复核 dry-run。
+2. **B-ING-1 需要真实设备**：非加密 iTunes/Finder 备份 + `AddressBook.sqlitedb`。
+3. **B-ING-2（T3 阈值）**依赖 B-ING-1 后的真实分布，不能纸上调参。
 
 ## 和其他计划的关系
 
@@ -167,3 +163,4 @@ CLI + 事务包裹开始。一旦 B-ING-0 合并，B-ING-1 就只欠用户做一
 | 日期 | 说明 |
 |---|---|
 | 2026-04-21 | 首版；4 条线 × 4 公共门槛 × 7 步上线路线。 |
+| 2026-04-22 | PC-1~PC-4 节与 B-ING-0 实现对齐；PC-3 补充 `started_at` 字段说明；删除「只写文档」旧段落。 |

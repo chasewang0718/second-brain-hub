@@ -34,6 +34,8 @@ def test_log_apply_writes_jsonl(tmp_path):
     assert ev["elapsed_ms"] == 123.4
     assert ev["source_sha256"]  # sha was computed for apply
     assert ev["backup"]["sha256"] == "abc"
+    # PC-3: started_at derived from ts_utc − elapsed_ms when not passed explicitly
+    assert ev.get("started_at") == "2026-04-21T21:59:59+00:00"
 
 
 def test_log_dry_run_skips_sha(tmp_path):
@@ -64,6 +66,23 @@ def test_log_appends_not_overwrites(tmp_path):
     log_file = tmp_path / "ingest-2026-04-21.jsonl"
     lines = log_file.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 3
+
+
+def test_log_explicit_started_at_overrides_derived(tmp_path):
+    ts = datetime(2026, 4, 21, 22, 0, 0, tzinfo=timezone.utc)
+    started = datetime(2026, 4, 21, 21, 58, 0, tzinfo=timezone.utc)
+    out = ingest_log.log_ingest_event(
+        source="ios_addressbook",
+        mode="apply",
+        stats={"status": "ok"},
+        source_path=None,
+        elapsed_ms=999.0,
+        started_at_utc=started,
+        now=ts,
+        log_dir=tmp_path,
+    )
+    ev = out["event"]
+    assert ev["started_at"] == started.isoformat(timespec="seconds")
 
 
 def test_log_skipped_on_oserror(tmp_path, monkeypatch):

@@ -8,14 +8,16 @@
          - 存量 person_identifiers 大小写 / 号段归一, 冲突写入 merge_candidates
       2. brain cloud flush --dry-run
          - 看看 cursor_queue 里是否有待人工处理任务
-      3. brain graph-rebuild-if-stale --max-age-hours 168
+      3. brain ingest-log-recent --days 14 --limit 10
+         - B-ING-0 健康检查: 读最近结构化 ingest JSONL (只读; 无日记仅 count=0)
+      4. brain graph-rebuild-if-stale --max-age-hours 168
          - 重建 Kuzu 只读视图 (F3 POC), 供 graph-fof / graph-shared-identifier
-      4. brain merge-candidates sync-from-graph --dry-run
+      5. brain merge-candidates sync-from-graph --dry-run
          - 图 → T3 队列预览 (proposed 数写进日志, 不落盘)
-      5. (可选) brain merge-candidates sync-from-graph --apply --auto-apply-min-score X
+      6. (可选) brain merge-candidates sync-from-graph --apply --auto-apply-min-score X
          - 仅当 -AutoApplyMinScore > 0 时启用. X >= 0.95 只自动合并 phone 级
            高置信对; 更低会把 email/wxid (0.92-0.93) 也吞进去, 不推荐.
-    每步独立 try/catch; 整体成功标准: 前两步 OK (第三步 Kuzu 可选).
+    每步独立 try/catch; 整体成功标准: 步骤 1-3 OK (图步骤随 -SkipGraph 旁路).
 .NOTES
     日志: D:\second-brain-assets\_runtime\logs\brain-weekly-maintenance-YYYYMMDD.log
     在 ROADMAP 中对应 E1; 由 tools/housekeeping/register-brain-weekly-maintenance.ps1 注册.
@@ -52,8 +54,14 @@ function Invoke-BrainStep {
     )
     Write-Log "[$Name] start"
     $sw = [Diagnostics.Stopwatch]::StartNew()
+    $savedPyPath = $env:PYTHONPATH
     try {
-        $raw = & python -m uv run --directory $BrainRepo brain @Args 2>&1 | Out-String
+        Push-Location $BrainRepo
+        $srcPath = Join-Path $BrainRepo 'src'
+        $env:PYTHONPATH = if ($savedPyPath) { "$srcPath;$savedPyPath" } else { $srcPath }
+        # Plain ``python -m brain_cli.main`` — no uv requirement (matches dev machines
+        # where ``uv`` is not installed).
+        $raw = & python -m brain_cli.main @Args 2>&1 | Out-String
         $exit = $LASTEXITCODE
         $sw.Stop()
         Add-Content -Path $logPath -Value $raw -Encoding UTF8
@@ -63,6 +71,9 @@ function Invoke-BrainStep {
         $sw.Stop()
         Write-Log "[$Name] error: $($_.Exception.Message)"
         return [PSCustomObject]@{Name=$Name; ExitCode=-1; Raw=$_.Exception.Message}
+    } finally {
+        Pop-Location
+        $env:PYTHONPATH = $savedPyPath
     }
 }
 
@@ -71,6 +82,8 @@ Write-Log '=== brain weekly maintenance start ==='
 $results = @()
 $results += Invoke-BrainStep -Name 'identifiers-repair' -Args @('identifiers-repair','--kinds','all')
 $results += Invoke-BrainStep -Name 'cloud-flush-dry-run' -Args @('cloud','flush','--dry-run')
+$results += Invoke-BrainStep -Name 'ingest-log-recent-health' `
+    -Args @('ingest-log-recent','--days','14','--limit','10')
 if (-not $SkipGraph) {
     # Cheap path: only rebuild when DuckDB is newer (or --max-age-hours
     # triggers). On a quiet week this is a sub-second no-op; on a busy
