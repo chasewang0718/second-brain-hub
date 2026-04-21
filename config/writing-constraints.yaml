@@ -1,0 +1,21 @@
+schema_version: "1.0"
+updated: "2026-04-21"
+
+writing:
+  max_paragraphs: 4
+  max_chars: 1200
+  tone_default: "clear, practical, concrete"
+  banned_phrases:
+    - "in today's fast-paced world"
+    - "at the end of the day"
+    - "unlock your potential"
+  platform_style:
+    xiaohongshu:
+      opening: "start with a concrete scene"
+      cta: "end with one actionable suggestion"
+    linkedin:
+      opening: "state a single strong takeaway first"
+      cta: "invite discussion with one question"
+    default:
+      opening: "state the core idea in one sentence"
+      cta: "end with next step"

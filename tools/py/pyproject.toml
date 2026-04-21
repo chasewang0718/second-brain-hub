@@ -1,0 +1,29 @@
+[project]
+name = "second-brain-hub-py"
+version = "0.1.0"
+description = "second-brain-hub Python core (F1.0 scaffold)"
+readme = "README.md"
+authors = [
+    { name = "chasewang0718", email = "info@chasewang.nl" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "duckdb>=1.5.2",
+    "fastmcp>=3.2.4",
+    "gitpython>=3.1.46",
+    "kuzu>=0.11.3",
+    "lancedb>=0.30.2",
+    "ollama>=0.6.1",
+    "pydantic>=2.13.3",
+    "pyyaml>=6.0.3",
+    "typer>=0.24.1",
+    "watchdog>=6.0.0",
+]
+
+[project.scripts]
+second-brain-hub-py = "second_brain_hub_py:main"
+brain = "brain_cli.main:main"
+
+[build-system]
+requires = ["uv_build>=0.11.7,<0.12.0"]
+build-backend = "uv_build"
