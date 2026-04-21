@@ -77,7 +77,7 @@ A3 收尾已经删掉了 `tools/ollama-pipeline/`、`tools/lib/`、`tools/feedba
 | B1 | ✅ `brain-asset-dedup.ps1` → `brain_agents/asset_dedup.py` + CLI `brain asset-dedup` (95cdac4) | | 2h | 低 |
 | B2 | ✅ `brain-asset-overview-cards.ps1` **已删除**（不迁移） | | 10m | 低 |
 | B3 | ✅ `brain-asset-migrate.ps1` → `brain_agents/asset_migrate.py` + CLI `brain asset-scan` + `brain asset-migrate-execute` | | 1d | 中 |
-| B4 | `brain-asset-source-cleanup.ps1` | `brain_agents/asset_source_cleanup.py` + CLI | 4h | 中（删源） |
+| B4 | ✅ `brain-asset-source-cleanup.ps1` → `brain_agents/asset_source_cleanup.py` + CLI `brain asset-source-cleanup` | | 4h | 中（删源） |
 | B5 | 清理 `.reference` profile 的 `gasset-*` 函数，改调 Python CLI | 修 `Microsoft.PowerShell_profile.ps1.reference` | 30m | 低 |
 | B6 | 删除 `tools/asset/*.ps1` + 本计划 | 彻底收尾 | 10m | 低 |
 
@@ -133,3 +133,4 @@ manifest 的 `source_path + rule + target_dir` 列。
 | 2026-04-21 | 首版；列出 5 个文件、风险等级、6 批迁移路线。 |
 | 2026-04-21 | B1 完成（stats ec3d0e1 + dedup 95cdac4）；B2 完成（overview-cards 删除 beaea16）。 |
 | 2026-04-21 | **B3 完成**：`brain_agents/asset_migrate.py` + CLI `brain asset-scan` / `brain asset-migrate-execute`。30 个新 pytest（classify 所有分支 / exclude / scan 写 TSV / execute copy+mtime+collision+trash+missing+brain-inbox+latest-manifest），全量 139 passed。PS 版暂保留做 3 周对拍。 |
+| 2026-04-21 | **B4 完成**：`brain_agents/asset_source_cleanup.py` + CLI `brain asset-source-cleanup`。**默认改为 dry-run**（PS 默认真删，安全升级）；`--apply` 显式真删；`--source-root` 显式开启空目录清扫（PS 硬编码 `D:\BaiduSyncdisk`，移除后更安全）。21 个新 pytest（OK 行解析 + manifest fallback + 三道安全门 + dry-run 不删 + apply 真删 + latest-manifest + 空目录级联清扫 + `--no-delete-empty-dirs` 关断），全量 **160 passed**。PS 版暂保留 3 周对拍。 |

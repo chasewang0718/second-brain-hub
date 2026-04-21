@@ -75,7 +75,7 @@ brain-tools/
 │   ├── brain-weekly-report.ps1     周报生成脚本 (被 Task Scheduler 调用)
 │   ├── register-weekly-task.ps1    注册 / 注销周报定时任务
 │   ├── brain-asset-migrate.ps1     外部资产扫描 / 迁移 (B3 已迁 Python: brain asset-scan / asset-migrate-execute; PS 暂留对拍)
-│   ├── brain-asset-source-cleanup.ps1   迁移 7 天后清理源文件 (带 size 校验)
+│   ├── brain-asset-source-cleanup.ps1   迁移 7 天后清理源文件 (B4 已迁 Python: brain asset-source-cleanup; PS 暂留对拍)
 │   ├── register-source-cleanup-task.ps1 注册一次性清源任务
 │   ├── brain-asset-pdf-pilot.ps1        Phase 2.3 PDF pilot (小样本验证)
 │   ├── brain-asset-pdf-batch.ps1        Phase 2.3 PDF batch orchestrator

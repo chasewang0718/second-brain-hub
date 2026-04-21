@@ -806,6 +806,43 @@ def asset_migrate_execute_cmd(
     typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
 
 
+@app.command("asset-source-cleanup")
+def asset_source_cleanup_cmd(
+    manifest_path: str = typer.Option("", "--manifest-path", help="Specific manifest TSV (default: latest under _migration/)"),
+    execute_log_path: str = typer.Option("", "--execute-log", help="Specific <job>-execute.log (default: sibling of manifest)"),
+    assets_root: str = typer.Option("", "--assets-root", help="Override paths.assets_root"),
+    brain_root: str = typer.Option("", "--brain-root", help="Override paths.content_root"),
+    source_root: str = typer.Option("", "--source-root", help="Root to sweep for empty dirs after deletion (e.g. D:\\BaiduSyncdisk). Skipped when omitted."),
+    apply: bool = typer.Option(False, "--apply", help="Actually delete source files. Default is DRY-RUN (safer than PS)."),
+    no_delete_empty_dirs: bool = typer.Option(False, "--no-delete-empty-dirs", help="Skip the post-deletion empty-dir sweep"),
+) -> None:
+    """B4 · Stage-4 source cleanup (Python port of
+    tools/asset/brain-asset-source-cleanup.ps1). Reads a manifest's
+    sibling ``<job>-execute.log`` (falls back to manifest rows), runs
+    src-exists + dst-exists + size-match safety gates, then (when
+    ``--apply``) deletes source files. Writes ``<job>-cleanup.log``.
+
+    Default is **DRY-RUN** (PS defaulted to real delete). Use
+    ``--apply`` to actually delete. Always pair with a recent
+    ``brain ingest-backup-now`` if anything indexed by DuckDB
+    points at the source paths.
+    """
+    from pathlib import Path as _P
+
+    from brain_agents.asset_source_cleanup import run
+
+    out = run(
+        manifest_path=_P(manifest_path) if manifest_path.strip() else None,
+        execute_log_path=_P(execute_log_path) if execute_log_path.strip() else None,
+        assets_root=_P(assets_root) if assets_root.strip() else None,
+        brain_root=_P(brain_root) if brain_root.strip() else None,
+        source_root=_P(source_root) if source_root.strip() else None,
+        apply=apply,
+        delete_empty_dirs=not no_delete_empty_dirs,
+    )
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
 @app.command("ingest-log-recent")
 def ingest_log_recent_cmd(
     days: int = typer.Option(7, "--days", min=1, max=90),
