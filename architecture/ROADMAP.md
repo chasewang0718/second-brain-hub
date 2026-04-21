@@ -400,7 +400,7 @@ Monica/Dex 式人际关系助手.
 | 能力 | CLI / 入口 |
 |---|---|
 | 查询联系人 / 逾期 / 会前上下文 | `brain who`, `brain overdue`（可选 `--channel wechat` 等）, `brain context-for-meeting`（`--since-days`、`--format md`） |
-| 同上（MCP） | `who_tool`, `overdue_tool`, `context_for_meeting_tool`, `merge_candidates_*`, `cloud_flush_preview`, `identifiers_repair_preview`, `cloud_queue_list_tool`, `ios_backup_locate_preview`, `wechat_sync_preview`（`brain_mcp/server.py`） |
+| 同上（MCP） | `who_tool`, `overdue_tool`, `context_for_meeting_tool`, `merge_candidates_*`, `cloud_flush_preview`, `identifiers_repair_preview`, `cloud_queue_list_tool`, `ios_backup_locate_preview`, `wechat_sync_preview`, `graph_fof_tool`, `graph_shared_identifier_tool`（`brain_mcp/server.py`） |
 | T3 合并候选（手动审） | `brain merge-candidates list`, `accept <id> [--keep PID]`, `reject <id>` |
 | 微信 decoder 导入 | `brain wechat-sync [--dry-run]` |
 | iPhone 备份定位 / 通讯录 / WhatsApp | `brain backup-ios-locate`, `brain contacts-ingest-ios`, `brain whatsapp-ingest-ios`（参见 `architecture/ios-backup-runbook.md`）；与本机备份 quick check：`tools/py/scripts/verify_ingest_dry_run.py` |
@@ -499,6 +499,7 @@ Monica/Dex 式人际关系助手.
 | 2026-04-21 | — | **F3 Kuzu 只读 POC**: `brain_agents/graph_build.py` + `brain_agents/graph_query.py`；CLI `brain graph-build/graph-stats/graph-fof/graph-shared-identifier`；Kuzu 作为 DuckDB 派生视图（全量重建 ~7s），POC 实测 FoF 29ms / shared-identifier 22ms / stats 26ms @ 75 人（< 1s 目标达标）；5 个 pytest 用例以 `importorskip("kuzu")` 保护；详见 `architecture/stage3-f3-kuzu-poc.md`（全量 57 个）。 |
 | 2026-04-21 | — | **E1 周期维护**: 新增 `tools/housekeeping/brain-weekly-maintenance.ps1` + `register-brain-weekly-maintenance.ps1`（每周日 23:00，跑 `identifiers-repair --kinds all` / `cloud flush --dry-run` / `graph-build`，均只读或幂等；日志写 `_runtime/logs/brain-weekly-maintenance-YYYYMMDD.log`；runbook 见 `architecture/e1-weekly-maintenance-runbook.md`）。 |
 | 2026-04-21 | — | **A3 收尾 · 弃用 PS 脚本**: 删除 12 个 (~105KB) 老 PS 脚本——整个 `tools/ollama-pipeline/`（6 + 配置 md）、`tools/lib/`（config-loader / telemetry / wait-for-batch）、`tools/feedback/harvest-feedback.ps1`、`tools/watchdog/pdf-production-watchdog.ps1`。全部已被 `brain_agents/file_inbox.py` + `image_inbox.py` + `audio_inbox.py` + `cloud_queue.py` 覆盖；保留 `notify.ps1`（通用通知库）。`tools/README.md` 更新子目录说明。 |
+| 2026-04-21 | — | **F3 接入 `context_for_meeting`**: `people.context_for_meeting` 现在同时拉取 Kuzu `shared_identifier` 结果填入 `graph_hints`；Markdown 输出附加 "潜在同一人线索" 表格；缺 Kuzu / 图未构建 → `{"status":"skipped"}` 优雅降级（Markdown 不渲染该节）。MCP 新增 `graph_fof_tool` + `graph_shared_identifier_tool`（也走 skipped 约定）。新增 6 个 pytest 用例（test_context_graph_hints + MCP skip smoke），全量 **63 passed**。 |
 
 ---
 

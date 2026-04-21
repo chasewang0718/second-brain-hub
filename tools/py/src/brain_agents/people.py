@@ -119,15 +119,40 @@ def overdue(days: int = 30, *, channel: str | None = None) -> list[dict[str, Any
     )
 
 
+def _collect_graph_hints(person_id: str, *, limit: int = 5) -> dict[str, Any]:
+    """Query the Kuzu read-only view for cross-links (F3 POC integration).
+
+    Graceful degradation: if Kuzu is not installed or the graph has not
+    been built yet, return ``{"status": "skipped", "reason": ...}`` so
+    the calling MD renderer can hide the section cleanly.
+    """
+    try:
+        from brain_agents.graph_query import shared_identifier
+    except Exception as exc:  # pragma: no cover - import guard
+        return {"status": "skipped", "reason": f"import:{exc.__class__.__name__}"}
+    try:
+        payload = shared_identifier(person_id, limit=limit)
+    except RuntimeError as exc:
+        return {"status": "skipped", "reason": str(exc)}
+    except Exception as exc:  # pragma: no cover - defensive
+        return {"status": "skipped", "reason": f"runtime:{exc.__class__.__name__}"}
+    return {
+        "status": "ok",
+        "shared_identifier": payload.get("results") or [],
+        "elapsed_ms": payload.get("elapsed_ms"),
+    }
+
+
 def context_for_meeting(
     name_or_alias: str,
     limit: int = 5,
     *,
     since_days: int | None = None,
+    include_graph_hints: bool = True,
 ) -> dict[str, Any]:
     candidates = who(name_or_alias)
     if not candidates:
-        return {"contact": None, "recent_interactions": []}
+        return {"contact": None, "recent_interactions": [], "graph_hints": None}
     contact = candidates[0]
     cid = contact["id"]
     lim = max(1, min(limit, 20))
@@ -150,7 +175,12 @@ def context_for_meeting(
         """,
         params,
     )
-    return {"contact": contact, "recent_interactions": interactions}
+    graph_hints = _collect_graph_hints(cid, limit=5) if include_graph_hints else None
+    return {
+        "contact": contact,
+        "recent_interactions": interactions,
+        "graph_hints": graph_hints,
+    }
 
 
 def context_for_meeting_markdown(payload: dict[str, Any]) -> str:
@@ -182,4 +212,19 @@ def context_for_meeting_markdown(payload: dict[str, Any]) -> str:
         ch = str(r.get("channel") or "")
         summary = str(r.get("summary") or "").replace("|", "\\|").replace("\n", " ")
         lines.append(f"| {ts} | {ch} | {summary} |")
+
+    hints = payload.get("graph_hints") or {}
+    shared = hints.get("shared_identifier") or [] if hints.get("status") == "ok" else []
+    if shared:
+        lines.append("")
+        lines.append("#### 潜在同一人线索 (shared identifier)")
+        lines.append("")
+        lines.append("| person_id | display_name | kind | value |")
+        lines.append("| --- | --- | --- | --- |")
+        for r in shared:
+            pid2 = str(r.get("person_id") or "")
+            nm = str(r.get("display_name") or "").replace("|", "\\|")
+            kind = str(r.get("kind") or "")
+            val = str(r.get("value_normalized") or "").replace("|", "\\|")
+            lines.append(f"| `{pid2}` | {nm} | {kind} | `{val}` |")
     return "\n".join(lines)

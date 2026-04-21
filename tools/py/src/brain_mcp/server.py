@@ -154,6 +154,42 @@ def ios_backup_locate_preview() -> dict:
 
 
 @mcp.tool
+def graph_fof_tool(person_id: str, limit: int = 10) -> dict:
+    """F3 Kuzu read-only: 2-hop friends-of-friends for a person_id.
+
+    Requires ``brain graph-build`` to have been run at least once.
+    Returns ``{"status": "skipped", "reason": ...}`` if kuzu missing
+    or graph dir empty.
+    """
+    try:
+        from brain_agents.graph_query import fof
+    except Exception as exc:
+        return {"status": "skipped", "reason": f"import:{exc.__class__.__name__}"}
+    try:
+        out = fof(person_id, limit=max(1, min(int(limit), 200)))
+    except RuntimeError as exc:
+        return {"status": "skipped", "reason": str(exc)}
+    return json.loads(json.dumps({"status": "ok", **out}, ensure_ascii=False, default=str))
+
+
+@mcp.tool
+def graph_shared_identifier_tool(person_id: str, limit: int = 20) -> dict:
+    """F3 Kuzu read-only: other persons sharing an identifier value (phone/email/wxid).
+
+    Graceful skip when kuzu is absent or the graph has not been built.
+    """
+    try:
+        from brain_agents.graph_query import shared_identifier
+    except Exception as exc:
+        return {"status": "skipped", "reason": f"import:{exc.__class__.__name__}"}
+    try:
+        out = shared_identifier(person_id, limit=max(1, min(int(limit), 200)))
+    except RuntimeError as exc:
+        return {"status": "skipped", "reason": str(exc)}
+    return json.loads(json.dumps({"status": "ok", **out}, ensure_ascii=False, default=str))
+
+
+@mcp.tool
 def wechat_sync_preview(decoder_dir: str = r"C:\dev-projects\wechat-decoder") -> dict:
     """Dry-run WeChat contacts + chat JSON ingest plan (no DuckDB writes). Requires decoder tree on disk."""
     from pathlib import Path
