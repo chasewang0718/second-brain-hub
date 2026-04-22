@@ -13,7 +13,7 @@ authoritative_at: C:\dev-projects\second-brain-hub\architecture\bing1-runbook.md
 iPhone 的一次 iTunes/Finder 备份，把通讯录（AddressBook.sqlitedb）
 导进 DuckDB 的 `persons` + `person_identifiers` 两张表。
 
-**代码全部就绪**（B-ING-0 已合并 20924ab，四个前置门槛全绿）。
+**代码全部就绪**（B-ING-0 已合并：事务包裹 + JSONL 审计 + `ingest-backup-now`）。
 这份文档的作用是：**你只要照步骤做，不用想。**
 
 ## 前置要求（跑之前确认）
@@ -23,7 +23,221 @@ iPhone 的一次 iTunes/Finder 备份，把通讯录（AddressBook.sqlitedb）
 - [ ] DuckDB 文件存在：`D:\second-brain-assets\_runtime\logs\brain-telemetry.duckdb`
 - [ ] **iPhone 连接了 PC**，但先**不要开始备份**（看第 1 步）
 
-## 五步上线
+## 超详细操作稿（PowerShell · 复制粘贴版）
+
+下面与「五步上线」一一对应，只是每一步拆成**可执行的命令**、**期望看见什么**、**卡住时怎么办**。建议新开一个 **Windows PowerShell 5.1** 或 **PowerShell 7** 窗口，全程在本窗口完成（避免漏设环境变量）。
+
+### 阶段 0 · 环境与仓库自检（约 2 分钟）
+
+1. 进入 Python 工具目录并固定编码（避免 JSON 里中文在个别终端乱码）：
+
+```powershell
+cd C:\dev-projects\second-brain-hub\tools\py
+$env:PYTHONPATH = "src"
+$env:PYTHONIOENCODING = "utf-8"
+```
+
+2. 确认 Python 与 DuckDB 可用：
+
+```powershell
+python --version
+python -c "import duckdb; print('duckdb ok')"
+```
+
+3. 确认 DuckDB 文件在约定路径（若你的 `paths.yaml` 改过路径，以实际为准）：
+
+```powershell
+Test-Path "D:\second-brain-assets\_runtime\logs\brain-telemetry.duckdb"
+```
+
+期望输出：`True`。若是 `False`，先不要继续 ingest，先检查 `config/paths.yaml` 里的 telemetry 路径。
+
+4. 确认 `brain` 子命令能加载（看到帮助里含 `contacts-ingest-ios` 即可）：
+
+```powershell
+python -m brain_cli.main contacts-ingest-ios --help
+```
+
+**本阶段通过标准**：无红色报错；`duckdb ok` 打印成功。
+
+---
+
+### 阶段 1 · 非加密备份（人工 · 约 10–60 分钟）
+
+在 **Apple 设备 / iTunes / Finder（Windows 上为「Apple 设备」应用）** 中：
+
+1. 选中当前 iPhone。
+2. 找到 **「加密本地备份」** → **取消勾选**。
+3. 若提示确认「不加密」→ 选 **不加密**。
+4. 点击 **立即备份**，等进度完成。
+
+**硬门槛**：加密备份里的通讯录库 hub **不解密**、也不尝试破解；若保持加密，请停下并改用「iCloud 导出 vCard」等其它路径（不在本 runbook 范围内）。
+
+备份完成后，Windows 上默认根目录通常是：
+
+```text
+%LOCALAPPDATA%\Apple Computer\MobileSync\Backup\<UDID>\
+```
+
+`<UDID>` 为约 40 位十六进制文件夹名；其下应有 `Manifest.db`。
+
+---
+
+### 阶段 2 · 定位备份与 AddressBook 路径（命令 · 约 1 分钟）
+
+仍在 `tools\py` 目录、`PYTHONPATH` 已设的前提下：
+
+```powershell
+python -m brain_cli.main backup-ios-locate
+```
+
+CLI 返回**嵌套 JSON**（实现见 `ios_backup_locator.locate_bundle`）：
+
+- 顶层键：`whatsapp`、`address_book`（两条线一次列出；你只要看通讯录）。
+- **`address_book.selected`**：解析到的 **`AddressBook.sqlitedb`** 绝对路径字符串；非空则自动 ingest 可用。
+- **`address_book.backup_dir`**：当前选用的 UDID 备份根目录。
+- **`address_book.status`**：一般为 `ok`；若为 `not_found` / `unresolved`，不要继续 ingest。
+
+若通讯录未解析：
+
+- 确认阶段 1 备份已成功、且**未加密**。
+- 若你知道 UDID 文件夹路径，显式传入（示例）：
+
+```powershell
+python -m brain_cli.main backup-ios-locate --backup-root "C:\Users\<你>\AppData\Local\Apple Computer\MobileSync\Backup\<UDID>"
+```
+
+常见备份根（择一存在即可）：`%LOCALAPPDATA%\Apple Computer\MobileSync\Backup\`、或 `%USERPROFILE%\Apple\MobileSync\Backup\`。
+
+**本阶段通过标准**：`address_book.selected` 非空且指向存在的文件；否则不要进入阶段 3。
+
+---
+
+### 阶段 3 · DuckDB 快照（强制 · 约 10 秒）
+
+**任何 `--apply` 真写入之前都必须做**。这是整库回滚保险。
+
+```powershell
+python -m brain_cli.main ingest-backup-now --label bing1-ios-addressbook
+```
+
+**期望 JSON 含义（重点字段）**：
+
+- `status` 为 **`ok`**（或与你本地 `ingest_backup` 实现一致的成功态）。
+- 出现 **`snapshot`** / **`path`** 类字段，指向新生成的 `*.duckdb` 备份文件路径。
+- 出现 **`sha256`**（或 sidecar 校验文件），便于事后核对文件未被篡改。
+
+请**手动复制**打印出来的快照路径到一个记事本（回滚要用）。
+
+**回滚（仅在需要时）**：关闭所有占用 `brain-telemetry.duckdb` 的进程（本仓库 CLI、Cursor MCP、其它 Python），将快照文件复制覆盖 telemetry 库路径（与 `paths.yaml` 一致），再重启相关工具。
+
+**本阶段通过标准**：快照命令成功结束；你已保存快照路径。
+
+---
+
+### 阶段 4 · Dry-run（只读 · 约 1 分钟）
+
+Dry-run **不写 DuckDB**，只解析备份并给出样本。
+
+```powershell
+python -m brain_cli.main contacts-ingest-ios --dry-run
+```
+
+输出较长，建议同时落盘便于你和我对照：
+
+```powershell
+python -m brain_cli.main contacts-ingest-ios --dry-run | Out-File -Encoding utf8 "$env:TEMP\bing1-contacts-dryrun.json"
+notepad "$env:TEMP\bing1-contacts-dryrun.json"
+```
+
+**人工检查 `sample` 数组（前 20 条左右）**：
+
+| 检查项 | 合格 |
+|--------|------|
+| 姓名显示 | 中文/英文可读，不是大片 `?` |
+| `phones` | 号码大致合理（apply 后会走归一化，不要求此处已是 `86`） |
+| `emails` | 看起来像真实邮箱 |
+| `person_rows` | 总量级合理（常见几百～几千；若为 0 或极端大，先停） |
+
+若 CLI 报 **`missing_db`**，说明自动定位失败。请用资源管理器在备份 UDID 目录下搜索 **`AddressBook.sqlitedb`**，找到后显式传入：
+
+```powershell
+python -m brain_cli.main contacts-ingest-ios --dry-run --db "D:\完整路径\AddressBook.sqlitedb"
+```
+
+**本阶段通过标准**：`status` 为 **`dry_run`**（或文档约定的 dry-run 成功态）；样本肉眼可信。
+
+---
+
+### 阶段 5 · Apply（真写入 · 约 1–5 分钟）
+
+**确认**：阶段 3 快照已成功；阶段 4 样本你已认可；**本人在电脑旁**（`real-ingest-scope` 要求：真 apply 时用户在场）。
+
+```powershell
+python -m brain_cli.main contacts-ingest-ios
+```
+
+未传 `--db` 时仍会自动定位；若 dry-run 时你已必须用 `--db`，此处**用同一路径**：
+
+```powershell
+python -m brain_cli.main contacts-ingest-ios --db "D:\完整路径\AddressBook.sqlitedb"
+```
+
+**成功时 JSON 典型特征**：
+
+- `status`: **`ok`**
+- `persons_created`: 首次全量导入时通常 **> 0**，数量级应接近 dry-run 里的 `person_rows`（不要求逐字相等：已有 person 可能只追加 identifier）
+- `identifiers_added`: 通常 **≥** 有明显标识增量
+- 不应出现未解释的顶层 **`error`**（若有，事务应已回滚，见下文故障表）
+
+建议保存输出：
+
+```powershell
+python -m brain_cli.main contacts-ingest-ios | Out-File -Encoding utf8 "$env:TEMP\bing1-contacts-apply.json"
+```
+
+---
+
+### 阶段 6 · 审计日志（约 30 秒）
+
+写入成功后应有一条 JSONL 事件（字段含 `started_at`、`elapsed_ms`、`persons_added` 等）：
+
+```powershell
+python -m brain_cli.main ingest-log-recent --source ios_addressbook --days 7 --limit 5
+```
+
+**期望**：`events` 数组最新一条的时间、路径、`mode`=`apply`、`status`=`ok`。
+
+若 ingest 中途抛错，仍可能出现一行 `status`=`error` 的审计 —— 用于复盘，不把失败当成成功。
+
+---
+
+### 阶段 7（可选）· T3 / 图 / 抽查熟人
+
+按需执行（详见上文「步骤 6（可选）」与「退出标志」）：
+
+```powershell
+python -m brain_cli.main merge-candidates sync-from-graph --dry-run
+python -m brain_cli.main graph-rebuild-if-stale --max-age-hours 1
+python -m brain_cli.main who "<某人显示名>"
+```
+
+---
+
+### 如何把结果发给我判读
+
+若任一步.output 看不懂，请打包发：
+
+1. **`bing1-contacts-dryrun.json`**（阶段 4 保存的文本）。
+2. **`bing1-contacts-apply.json`**（阶段 5，若已跑）。
+3. **`ingest-log-recent`** 整段终端输出。
+4. 一句话说明：**备份是否确认未加密**、**是否首次 apply**。
+
+我会根据 JSON 字段告诉你是否可继续、是否要回滚快照。
+
+---
+
+## 五步上线（精简版 · 与上文阶段对应）
 
 ### 步骤 1 · 做一次**非加密**的 iTunes/Finder 备份（你来做）
 
@@ -45,7 +259,7 @@ iPhone 的一次 iTunes/Finder 备份，把通讯录（AddressBook.sqlitedb）
 ```
 其中 `<UDID>` 是一个 40 字符十六进制字符串。
 
-### 步骤 2 · 定位备份（我帮你跑）
+### 步骤 2 · 定位备份（CLI）
 
 ```powershell
 cd C:\dev-projects\second-brain-hub\tools\py
@@ -53,12 +267,9 @@ $env:PYTHONPATH = 'src'
 python -m brain_cli.main backup-ios-locate
 ```
 
-**期望输出**（JSON）：
-- `selected` 字段**非空**（指向最新备份的 UDID 目录）
-- `addressbook` 字段指向某个 `Manifest.db` 能解析出来的路径
+**期望输出**（JSON）：嵌套结构；通讯录路径在 **`address_book.selected`**（`AddressBook.sqlitedb` 的绝对路径）。可选 **`whatsapp`** 块（与本步骤无关）。
 
-**如果 `selected` 为 null**：备份没完成 / 没找到 / 这台 PC 没备份
-过这部 iPhone。回步骤 1。
+**若 `address_book.selected` 为 null**：备份未完成、未找到含 `Manifest.db` 的 UDID 目录、或 Manifest 未解析出文件。回到步骤 1，或用 `--backup-root` 指向正确 UDID 目录再跑一次。
 
 ### 步骤 3 · 先快照 DuckDB（强制前置）
 
@@ -155,3 +366,4 @@ python -m brain_cli.main merge-candidates list --status pending --limit 20
 | 日期 | 说明 |
 |---|---|
 | 2026-04-21 | 首版；6 步，配合 B-ING-0 (`20924ab`) + `27c0827` 使用。 |
+| 2026-04-22 | 新增「超详细操作稿」：阶段 0–7（ PowerShell 复制粘贴、`backup-ios-locate` 嵌套 JSON 说明、`Out-File` 落盘）；精简版步骤 2 与 `address_book.selected` 对齐；备份路径注明 `LOCALAPPDATA` / `Apple\MobileSync`。 |
