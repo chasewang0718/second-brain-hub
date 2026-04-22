@@ -61,3 +61,14 @@ budget:
   warn_at_pct: 70
   degrade_at_pct: 90
   halt_at_pct: 100
+
+# B-ING-0.1: identity / phone normalization
+# Uses Google's libphonenumber (`phonenumbers` Python port).
+# `phone_default_region`: ISO 3166-1 alpha-2 region code applied when the raw
+# number has no `+` / IDD prefix. This is what lets "0615156595" and
+# "(06) 15 55 64 91" both canonicalize to "31615156595" (E.164 without the `+`).
+# Override per-caller by passing `default_region=` to normalize_phone_digits.
+# Bare 11-digit CN mobiles (e.g. 13800138000) are still short-circuited to
+# "86…" regardless of this region, matching existing behavior / tests.
+identity:
+  phone_default_region: "NL"

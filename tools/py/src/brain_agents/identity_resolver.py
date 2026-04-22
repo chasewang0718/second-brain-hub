@@ -5,9 +5,18 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from functools import lru_cache
 from typing import Any
 
 from brain_memory.structured import execute, query
+
+try:  # pragma: no cover - always available in prod (pinned in pyproject)
+    import phonenumbers as _pn
+    from phonenumbers import PhoneNumberFormat as _PNFormat
+
+    _HAS_PHONENUMBERS = True
+except ImportError:  # pragma: no cover
+    _HAS_PHONENUMBERS = False
 
 # Mainland China mobile, national significant number (11 digits, leading 1).
 # Tuned to avoid treating NANP domestic numbers like 14155550123 as CN (collision with coarse 1[3-9]… rules).
@@ -16,33 +25,79 @@ _CN_DOMESTIC_MOBILE = re.compile(
 )
 
 
-def normalize_phone_digits(raw: str) -> str:
-    """Normalize phone for matching: digits-only canonical form; CN mobiles → leading 86."""
-    d = re.sub(r"\D", "", raw or "")
-    if not d:
+@lru_cache(maxsize=1)
+def _default_phone_region() -> str | None:
+    """Read `identity.phone_default_region` from thresholds.yaml (cached, lazy)."""
+    try:
+        from brain_core.config import load_thresholds_config
+
+        cfg = load_thresholds_config() or {}
+        region = (cfg.get("identity") or {}).get("phone_default_region")
+        if isinstance(region, str) and region.strip():
+            return region.strip().upper()
+    except Exception:
+        # Config missing / malformed: fall back to region-less parsing.
+        return None
+    return None
+
+
+def normalize_phone_digits(raw: str, *, default_region: str | None = None) -> str:
+    """Normalize phone for matching: digits-only canonical E.164 body (no leading ``+``).
+
+    Parsing order:
+
+    1. Bare CN domestic mobile (11 digits matching ``_CN_DOMESTIC_MOBILE``) and
+       the ``0086…`` IDD variant are short-circuited to ``86…`` — this preserves
+       the CN-first semantics regardless of ``default_region``.
+    2. libphonenumber (``phonenumbers``) is asked to parse the raw string with
+       ``default_region`` as context (letting it pick up NL ``06…`` / UK ``07…``
+       / DE ``01…`` etc. without a ``+`` prefix). On success the E.164 form is
+       returned with the leading ``+`` stripped.
+    3. Last resort: return digits-only (``re.sub(\\D, "")``), matching pre-0.1
+       behavior for exotic inputs.
+
+    ``default_region`` is an ISO 3166-1 alpha-2 code (e.g. ``"NL"``). When
+    ``None`` (default), falls back to ``thresholds.yaml → identity.phone_default_region``.
+    """
+    s = (raw or "").strip()
+    if not s:
         return ""
-    # Common dial-out prefix 0086xxxxxxxxxxx → 86xxxxxxxxxxxx
+
+    # Step 1: CN short-circuits (keep existing semantics / tests stable).
+    d = re.sub(r"\D", "", s)
     if d.startswith("0086"):
         d = "86" + d[4:]
-    # Already E.164-like China (+86 …)
-    if len(d) == 13 and d.startswith("86"):
-        rest = d[2:]
-        if _CN_DOMESTIC_MOBILE.match(rest):
+        if len(d) == 13 and d.startswith("86") and _CN_DOMESTIC_MOBILE.match(d[2:]):
             return d
+        # Still a CN IDD-prefixed number, but not a recognized mobile pattern; return as-is.
         return d
-    # 11-digit domestic CN mobile
     if _CN_DOMESTIC_MOBILE.match(d):
         return "86" + d
+
+    # Step 2: libphonenumber with region context.
+    if _HAS_PHONENUMBERS:
+        region = default_region if default_region is not None else _default_phone_region()
+        try:
+            parsed = _pn.parse(s, region)
+            if _pn.is_valid_number(parsed) or _pn.is_possible_number(parsed):
+                e164 = _pn.format_number(parsed, _PNFormat.E164)
+                if e164.startswith("+"):
+                    return e164[1:]
+                return e164
+        except _pn.phonenumberutil.NumberParseException:
+            pass  # fall through
+
+    # Step 3: legacy digits-only fallback.
     return d
 
 
-def normalize_value(kind: str, value: str) -> str:
+def normalize_value(kind: str, value: str, *, default_region: str | None = None) -> str:
     k = kind.lower()
     raw = value.strip()
     if k in ("email", "gmail_addr"):
         return raw.lower()
     if k == "phone":
-        return normalize_phone_digits(raw)
+        return normalize_phone_digits(raw, default_region=default_region)
     return raw.lower()
 
 

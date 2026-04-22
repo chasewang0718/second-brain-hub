@@ -13,20 +13,21 @@ related:
 B-ING-1 本身已 ✅（248/248，snapshot `20260422-011824-bing1-ios-addressbook.duckdb`，sha `53ad43bd…`）。  
 本文档只记录真跑之后冒出来、**不阻塞打勾**、但**必须在 B-ING-3 WhatsApp 上线前**处理的问题。
 
-| 编号 | 标题 | 紧迫度 | 范围 |
-|------|------|--------|------|
-| **B-ING-0.1** | Phone normalizer: NL 本地 `06…` → `+316…`（并扩到通用「本地国家码」规则） | **HIGH**（直接造成真·重复） | 代码 |
-| **B-ING-1.4** | `ios_backup_locator` 选优：不要选空子库 | MEDIUM（坑新手 / 老练用户手动 `--db` 绕过） | 代码 |
-| **B-ING-1.5** | 清理 DuckDB 里的 T-fixture 污染（174 persons + 8 merge_log） | MEDIUM（噪音干扰 sync-from-graph） | 数据清理 + 加测试隔离 |
-| **B-ING-1.6** | 加 `merge-candidates enqueue-manual --pair` 子命令（解决"同名无 shared identifier"的人工合并） | MEDIUM（多处真·重复需要它） | 代码 |
-| **B-ING-1.7** | `ingest_events.backup` 字段回填最近一次 snapshot 路径/sha | LOW（审计完备性） | 代码 |
-| **B-ING-1.8** | 手动处理 9 组真·重复（Cheng Wang 等） | 在 1.4 / 0.1 / 1.6 完成后再跑 | 数据 |
+| 编号 | 标题 | 紧迫度 | 范围 | 状态 |
+|------|------|--------|------|------|
+| **B-ING-0.1** | Phone normalizer: NL 本地 `06…` → `+316…`（通过 `phonenumbers` + `default_region`） | **HIGH** | 代码 | **✅ 2026-04-22** |
+| **B-ING-1.4** | `ios_backup_locator` 选优：不要选空子库 | MEDIUM | 代码 | open |
+| **B-ING-1.5** | 清理 DuckDB 里的 T-fixture 污染（174 persons + 8 merge_log） | MEDIUM | 数据 + 测试隔离 | open |
+| **B-ING-1.6** | 加 `merge-candidates enqueue-manual --pair` 子命令 | MEDIUM | 代码 | open |
+| **B-ING-1.7** | `ingest_events.backup` 字段回填最近一次 snapshot 路径/sha | LOW | 代码 | open |
+| **B-ING-1.8** | 手动处理 **9** 组真·重复（0.1 之后由 repair 自动识别到） | MEDIUM | 数据 | open，已在 `merge_candidates` 排队待人工 accept/reject |
+| **B-ING-1.10** | `identifiers-repair --dry-run` 不应写 `merge_candidates`（且应按 (person_a, person_b) 去重） | LOW | 代码 | open（0.1 验证时顺手发现） |
 
 ---
 
-## B-ING-0.1 · Phone normalizer 补 NL 本地号（并泛化）
+## B-ING-0.1 · Phone normalizer 补 NL 本地号（并泛化） ✅ 2026-04-22
 
-### 现象
+### 现象（修复前）
 
 本次 apply 在 `person_identifiers` 里写入了下列三对、**逻辑上同号、`value_normalized` 不同**的记录：
 
@@ -40,25 +41,47 @@ B-ING-1 本身已 ✅（248/248，snapshot `20260422-011824-bing1-ios-addressboo
 
 ### 根因
 
-`contacts_ingest_ios` 的 phone normalizer 没有「默认国家上下文」假设，把未带 `+` 的号当成「原样字符串」存。
+`identity_resolver.normalize_phone_digits` 只有 CN mobile + `0086…` 特判 + digits-only 兜底，没有「默认国家上下文」，把未带 `+` 的号当字符串原样保留。
 
-### 修复方向
+### 修复（已落地）
 
-1. 增加 **默认国家码**配置（例如 `config/paths.yaml` 或 `config/normalize.yaml`），
-   - `default_country: NL`（从 iOS AddressBook 元数据 / device locale / 用户在 `paths.yaml` 手配 三者其一推导；优先级：AddressBook > device > config）。
-2. 引入 **本地号前缀映射表**：
-   - NL `0` → `+31 `
-   - UK `0` → `+44 `
-   - DE `0` → `+49 `
-   - CN `0` → `+86 `（大陆一般直接存 11 位手机号不带 `0`，但固话带 `0`；要谨慎）
-   - 必须只在**没有 `+` 前缀**且**号首位为 `0`**时触发，避免误伤。
-3. 复用成熟库（推荐 **`phonenumbers`** — Google libphonenumber Python binding），而不是自己写 regex；按 `default_country` 解析 → 存 `value_normalized` 为 E.164 / 不带 `+` 的纯数字。
-4. 加 pytest：NL / UK / DE 本地号、国际号、纯数字、带空格/括号/连字符、短号（救援号、10xxx）的矩阵。
+1. `tools/py/pyproject.toml` 加依赖 `phonenumbers>=9.0.28`（Google libphonenumber 的 Python port）。
+2. `config/thresholds.yaml` 新增段落：
 
-### 验收
+   ```yaml
+   identity:
+     phone_default_region: "NL"
+   ```
 
-- 前后两次 `contacts-ingest-ios`（同一份 `AddressBook.sqlitedb`）在 **归一化后** 的 `value_normalized` 集合保持幂等。
-- Hammond/Jerrel/Patricia 在新 ingest 后自动合并（`persons_created` 对应减少；`merge-candidates sync-from-graph` 产生 shared identifier 候选或 ingest 内直接 dedup 到 1 个 person）。
+3. `identity_resolver.normalize_phone_digits(raw, *, default_region=None)`：
+   - **Step 1（不变）**：裸 11 位 CN 手机号 + `0086…` 前缀短路，保持既有语义（`86…`），所有老测试保持绿。
+   - **Step 2（新）**：`phonenumbers.parse(raw, default_region)`，成功 → 返回 E.164 去掉 `+` 的纯数字（`31615156595`）。
+   - **Step 3（兜底）**：libphonenumber 抛 `NumberParseException` 或号码实在无效 → 回到 digits-only。
+   - `default_region=None` 时自动读 `thresholds.yaml → identity.phone_default_region`（`lru_cache`，每进程一次）。
+4. `normalize_value(kind, value, *, default_region=None)` 透传 region 到 phone 分支；`email` / `gmail_addr` / `wxid` 行为不变。
+5. `tests/test_identity_phone_normalize.py` 从 5 个测试扩到 **13 个**：保留全部 CN 用例，新增 NL 本地 / 带空格括号 / 带 `+` 形式、UK `07…`、Ghana `+233…`、DE `+49…`、Colombia `+57…`、`normalize_value` 透传 region、email 忽略 region、NL 本地+国际形式**幂等**。
+
+### 验收痕迹（真跑）
+
+Snapshot：`D:\second-brain-assets\_backup\telemetry\20260422-015459-bing01-phone-normalize.duckdb`  sha `a1108eb29333634dc8615cf9d77aa729fc4f38097879540fbcf2d531dcf464a7`（41955328 bytes）。
+
+```
+brain identifiers-repair --kinds phone --dry-run / --apply
+  rows_scanned       201
+  skipped_unchanged  178   # 已是对的
+  updated             14   # 同人内 06… → 31… 静默纠正
+  deleted_duplicate    0
+  merge_candidates     9   # 跨 person 冲突 → 进 T3 队列等人工 accept
+```
+
+- `brain merge-candidates list --status pending` 里 **9 对** `phone_repair_collision` 全部是真重复：Hammond、Jerrel、Patricia、Harry / Harry Schortinghuis、Lunsing Kazemier / Cazemier、Hady / Hadi、乐燕 / Leyan、悦取 / 老婆、英华 / 小华。
+- 全量 pytest 200/201 pass，唯一失败的 `test_context_for_meeting_markdown_contains_shared_identifier_section` 属 B-ING-1.5（DB 污染）、与本次修改无关（`git stash` 基线复现同样失败）。
+- 顺手发现：`identifiers-repair` 的 `--dry-run` 仍然会往 `merge_candidates` 写 + 不按 (person_a, person_b) pair 去重；重跑两轮后队列里 9 对膨胀到 36 行，已手工 SQL 去重回 9 行。→ 单立 **B-ING-1.10**。
+
+### 后续
+
+- **B-ING-1.8** 现在有 9 条明确的 pending 可直接过 `brain merge-candidates accept <id>`：7 条（同名或拼写变体）可直接批；2 条（`悦取/老婆`、`英华/小华`）需要人眼再确认。
+- 建议 accept 后再跑一次 `identifiers-repair --kinds phone`：被 absorbed 行的 `0615156595` 会此时撞 kept 的 `31615156595` 命中 `deleted_duplicate` 路径，彻底清理。
 
 ---
 

@@ -629,3 +629,4 @@ python -m brain_cli.main merge-candidates list --status pending --limit 20
 | 2026-04-22 | 新增「超详细操作稿」：阶段 0–7（ PowerShell 复制粘贴、`backup-ios-locate` 嵌套 JSON 说明、`Out-File` 落盘）；精简版步骤 2 与 `address_book.selected` 对齐；备份路径注明 `LOCALAPPDATA` / `Apple\MobileSync`。 |
 | 2026-04-22 | 重写「保姆级一步步操作指南」：按数字步骤 0–9 对齐「操作 / 期望 / 卡住时」三栏；环境自检整合为一次粘贴；加入 `backup-ios-locate` 期望 JSON 示例、回滚 `Copy-Item` 命令、故障速查表、验收打勾清单；删掉原 A–I 字母小节的冗余标题。 |
 | 2026-04-22 | **首次 apply 成功**（248/248，快照 sha `53ad43bd…`）；在文末新增「首次执行痕迹」小节；发现 5 项事后问题，开 `bing1-followups.md` 跟踪。 |
+| 2026-04-22 | **B-ING-0.1 关**（Phone normalizer 经 `phonenumbers` + `identity.phone_default_region: NL`）：`identifiers-repair --kinds phone` 真跑出 14 行静默升级 + 9 对跨 person 候选进 T3 队列；快照 `20260422-015459-bing01-phone-normalize.duckdb` sha `a1108eb2…`；顺手挖到 B-ING-1.10（repair dry-run 仍写 `merge_candidates`）。 |
