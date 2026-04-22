@@ -108,6 +108,103 @@ def accept_candidate(candidate_id: int, *, kept_person_id: str | None = None) ->
     return {"status": "merged", "kept": kept, "absorbed": absorbed, "merge_candidate_id": candidate_id}
 
 
+def enqueue_manual_candidate(
+    person_a: str,
+    person_b: str,
+    *,
+    reason: str,
+    score: float = 1.0,
+    auto_apply: bool = False,
+) -> dict[str, Any]:
+    """Manually queue a ``(person_a, person_b)`` merge for human review.
+
+    B-ING-1.6 motivation: :func:`sync_from_graph` only surfaces pairs that
+    already share an identifier in Kuzu. Plenty of real duplicates don't
+    share ANY identifier (Cheng Wang's personal vs work email, Alice
+    Klamer's phone-only vs email-only split) and the graph never finds
+    them. This is the human-driven entry point.
+
+    Guarantees:
+
+    - Both ``person_a`` and ``person_b`` must exist in ``persons``.
+    - Same id → error.
+    - Pair is normalized to ``(smaller_id, larger_id)`` so (A,B) == (B,A).
+    - If the pair is already present in ``merge_log`` OR any row of
+      ``merge_candidates`` (any status), returns ``status="noop"`` with
+      the existing row's id/status — no double-queue.
+    - ``reason`` is stored prefixed as ``manual:<text>`` so audit queries
+      can distinguish manual vs graph-derived entries.
+    - ``auto_apply=True`` immediately calls :func:`accept_candidate`.
+
+    Returns (on success): ``{"status": "queued" | "merged", ...}``.
+    """
+    if not person_a or not person_b:
+        return {"status": "error", "reason": "missing_person_id"}
+    pa = person_a.strip()
+    pb = person_b.strip()
+    if not pa or not pb:
+        return {"status": "error", "reason": "missing_person_id"}
+    if pa == pb:
+        return {"status": "error", "reason": "same_person", "person_id": pa}
+
+    for pid in (pa, pb):
+        if fetch_one("SELECT 1 AS n FROM persons WHERE person_id = ?", [pid]) is None:
+            return {"status": "error", "reason": "person_not_found", "person_id": pid}
+
+    ca, cb = sorted([pa, pb])
+    pair = (ca, cb)
+    if pair in _already_handled_pairs():
+        existing = fetch_one(
+            "SELECT id, status FROM merge_candidates WHERE person_a = ? AND person_b = ? ORDER BY id DESC LIMIT 1",
+            [ca, cb],
+        )
+        return {
+            "status": "noop",
+            "reason": "already_handled",
+            "person_a": ca,
+            "person_b": cb,
+            "existing_merge_candidate_id": int(existing["id"]) if existing else None,
+            "existing_status": (
+                str(existing["status"]).lower() if existing and existing.get("status") is not None else None
+            ),
+        }
+
+    raw_reason = (reason or "").strip() or "unspecified"
+    try:
+        s = float(score)
+    except (TypeError, ValueError):
+        s = 1.0
+    s = max(0.0, min(1.0, s))
+
+    cand = {
+        "person_a": ca,
+        "person_b": cb,
+        "score": s,
+        "reason": f"manual:{raw_reason}",
+        "detail": {"source": "manual_cli", "raw_reason": raw_reason},
+    }
+    if auto_apply:
+        out = _insert_and_accept(cand)
+        return {
+            "status": "merged" if out.get("accepted") else "pending_accept_failed",
+            "person_a": ca,
+            "person_b": cb,
+            "merge_candidate_id": out.get("merge_candidate_id"),
+            "kept": out.get("kept"),
+            "absorbed": out.get("absorbed"),
+            "error": out.get("error"),
+        }
+    mid = _insert_pending(cand)
+    return {
+        "status": "queued",
+        "person_a": ca,
+        "person_b": cb,
+        "score": s,
+        "reason": cand["reason"],
+        "merge_candidate_id": mid,
+    }
+
+
 def _enumerate_shared_identifier_pairs() -> list[dict[str, Any]]:
     """Query the built Kuzu graph for cross-person shared-identifier pairs.
 

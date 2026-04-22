@@ -526,6 +526,34 @@ def merge_candidates_reject_cmd(candidate_id: int = typer.Argument(..., help="me
     typer.echo(json.dumps(reject_candidate(candidate_id), ensure_ascii=False, indent=2, default=str))
 
 
+@merge_candidates_app.command("enqueue-manual")
+def merge_candidates_enqueue_manual_cmd(
+    person_a: str = typer.Argument(..., help="First person_id"),
+    person_b: str = typer.Argument(..., help="Second person_id (must differ from person_a)"),
+    reason: str = typer.Option(..., "--reason", help="Free-text reason (stored as 'manual:<reason>')"),
+    score: float = typer.Option(1.0, "--score", min=0.0, max=1.0, help="Confidence score in [0,1]"),
+    auto_apply: bool = typer.Option(False, "--auto-apply", help="Immediately merge after enqueue"),
+) -> None:
+    """Queue a manual (person_a, person_b) merge candidate (B-ING-1.6).
+
+    Use this when human judgment identifies duplicates that
+    ``sync-from-graph`` can't surface (the pair shares no normalized
+    identifier). The pair is canonicalized (A,B == B,A), deduped against
+    existing ``merge_candidates`` / ``merge_log``, and optionally
+    auto-applied.
+    """
+    from brain_agents.merge_candidates import enqueue_manual_candidate
+
+    out = enqueue_manual_candidate(
+        person_a,
+        person_b,
+        reason=reason,
+        score=score,
+        auto_apply=auto_apply,
+    )
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
 @merge_candidates_app.command("sync-from-graph")
 def merge_candidates_sync_from_graph_cmd(
     dry_run: bool = typer.Option(True, "--dry-run/--apply", help="Preview proposals (default) or insert pending rows"),

@@ -18,7 +18,7 @@ B-ING-1 本身已 ✅（248/248，snapshot `20260422-011824-bing1-ios-addressboo
 | **B-ING-0.1** | Phone normalizer: NL 本地 `06…` → `+316…`（通过 `phonenumbers` + `default_region`） | **HIGH** | 代码 | **✅ 2026-04-22** |
 | **B-ING-1.4** | `ios_backup_locator` 选优：不要选空子库 | MEDIUM | 代码 | **✅ 2026-04-22** |
 | **B-ING-1.5** | 清理 DuckDB 里的 T-fixture 污染 + pytest 真隔离 | MEDIUM | 数据 + 测试隔离 | **✅ 2026-04-22** |
-| **B-ING-1.6** | 加 `merge-candidates enqueue-manual --pair` 子命令 | MEDIUM | 代码 | open |
+| **B-ING-1.6** | 加 `merge-candidates enqueue-manual` 子命令 | MEDIUM | 代码 | **✅ 2026-04-22** |
 | **B-ING-1.7** | `ingest_events.backup` 字段回填最近一次 snapshot 路径/sha | LOW | 代码 | open |
 | **B-ING-1.8** | 手动处理 9 组真·重复 | MEDIUM | 数据 | **✅ 9/9 2026-04-22** |
 | **B-ING-1.9** | `contacts-ingest-ios` 幂等性真跑 | MEDIUM | 测试 | **✅ 2026-04-22** |
@@ -173,32 +173,52 @@ brain identifiers-repair --kinds phone --dry-run / --apply
 
 ---
 
-## B-ING-1.6 · `merge-candidates enqueue-manual --pair`
+## B-ING-1.6 · `merge-candidates enqueue-manual` ✅ 2026-04-22
 
-### 为什么需要
+### 现象（修复前）
 
-`merge-candidates sync-from-graph` 只在两 person 共享至少一个 `value_normalized` 时 enqueue。本次真·重复里**有若干组 identifier 完全不重叠**（例如 `Cheng Wang`：一份私人邮箱、一份公司邮箱），靠 graph 永远找不到，但用户人工已确认同人。
+`merge-candidates sync-from-graph` 只在两 person 共享至少一个 `value_normalized` 时 enqueue。B-ING-1.8 里的 `Cheng Wang`（私人 vs 公司邮箱）、`Alice Klamer`（phone-only vs email-only）这类真·重复 identifier 完全不重叠，graph 永远找不到。子命令只有 `list / accept / reject / sync-from-graph`，**没法把人工决定的 pair 入队**。
 
-目前 `merge-candidates` 子命令只有 `list / accept / reject / sync-from-graph`，**没法把人工决定的 pair 入队**。
+### 修复
 
-### 接口提案
+`tools/py/src/brain_agents/merge_candidates.py` 新增 `enqueue_manual_candidate(person_a, person_b, *, reason, score=1.0, auto_apply=False)`：
+
+1. 两个 id 同值 → `{"status":"error","reason":"same_person"}`。
+2. 任一 id 在 `persons` 中不存在 → `{"status":"error","reason":"person_not_found","person_id":...}`。
+3. pair 规整为 `(smaller_id, larger_id)`（对称）。
+4. 已在 `merge_log` 或 `merge_candidates`（任意状态）命中 pair → `{"status":"noop","reason":"already_handled","existing_merge_candidate_id":...,"existing_status":...}`。
+5. 写一行 `merge_candidates`，`reason = "manual:<user-text>"`（前缀区分 graph 来源），`detail_json.source = "manual_cli"`。
+6. `score` clamp 到 `[0, 1]`。
+7. `auto_apply=True` 时立刻 `accept_candidate(new_id)` → 直接合并 + 写 `merge_log`。
+
+CLI（`tools/py/src/brain_cli/main.py`）：
 
 ```
-brain merge-candidates enqueue-manual \
-    --pair <person_id_a> <person_id_b> \
+brain merge-candidates enqueue-manual <person_id_a> <person_id_b> \
     --reason "<自由文本>" \
-    [--score 1.0] \
-    [--auto-apply]
+    [--score 1.0] [--auto-apply]
 ```
 
-- 直接写一行到 `merge_candidates`，`score = 1.0`，`reason = "manual: ..."`，`status = pending`（或直接 `accepted` 若传 `--auto-apply`，走和 F3 一致的 accept 路径）。
-- 对应 MCP 工具：`merge_candidates_enqueue_manual_tool`。
-- 单测：双向对称（A,B == B,A）、同 id 拒绝、不存在 id 报错、落库后 `list` 能读到。
+### 测试
 
-### 验收
+`tests/test_merge_candidates.py` 新增 7 条：
+- `test_enqueue_manual_happy_path_inserts_pending_row`：reason 带 `manual:` 前缀、status=pending。
+- `test_enqueue_manual_canonicalizes_pair_order`：(B,A) 调用后返回的 `person_a/person_b` 已排序。
+- `test_enqueue_manual_dedupes_against_existing_pair`：同 pair 再入队返回 `noop`，反向 pair 也去重。
+- `test_enqueue_manual_rejects_same_person` / `test_enqueue_manual_rejects_unknown_person_id`。
+- `test_enqueue_manual_auto_apply_merges_immediately`：`auto_apply=True` 后 absorbed 行消失、candidate 转 `accepted`。
+- `test_enqueue_manual_clamps_score_into_unit_range`：`score=7.5` 落库为 `1.0`。
 
-- 9 组真·重复里 identifier 完全不重叠的那几组（`Cheng Wang` 等）可以通过此命令入队，再 `accept` 完成合并。
-- F3 的 `auto-apply-min-score` 路径与本命令组合兼容。
+`pytest tests/test_merge_candidates.py` 18/18 通过（历史 11 + 新 7）。
+
+### 用法
+
+```
+brain merge-candidates enqueue-manual p_cheng_personal p_cheng_work \
+    --reason "same_person_email_split" --auto-apply
+```
+
+对应 B-ING-1.8 备注里的 `Cheng Wang` / `Alice Klamer` 那几组 identifier 完全不重叠的真·重复，现在不再需要手搓 SQL。
 
 ---
 

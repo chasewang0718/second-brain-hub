@@ -9,7 +9,12 @@ from brain_agents.identity_resolver import (
     ensure_person_with_seed,
     merge_persons,
 )
-from brain_agents.merge_candidates import accept_candidate, list_candidates, reject_candidate
+from brain_agents.merge_candidates import (
+    accept_candidate,
+    enqueue_manual_candidate,
+    list_candidates,
+    reject_candidate,
+)
 from brain_memory.structured import execute, fetch_one, query
 
 
@@ -170,3 +175,90 @@ def test_merge_persons_skips_alias_when_names_equal() -> None:
     row = fetch_one("SELECT aliases_json FROM persons WHERE person_id = ?", [kept])
     assert row is not None
     assert json.loads(row["aliases_json"]) == []
+
+
+# --- B-ING-1.6: merge-candidates enqueue-manual --pair
+
+
+def test_enqueue_manual_happy_path_inserts_pending_row() -> None:
+    a = ensure_person_with_seed("T Man A", source_kind="test")
+    b = ensure_person_with_seed("T Man B", source_kind="test")
+    r = enqueue_manual_candidate(a, b, reason="same_person_email_split")
+    assert r["status"] == "queued"
+    mid = int(r["merge_candidate_id"])
+    assert mid > 0
+    row = fetch_one("SELECT status, reason FROM merge_candidates WHERE id = ?", [mid])
+    assert row is not None and row["status"] == "pending"
+    assert str(row["reason"]).startswith("manual:same_person_email_split")
+
+
+def test_enqueue_manual_canonicalizes_pair_order() -> None:
+    a = ensure_person_with_seed("T Sym A", source_kind="test")
+    b = ensure_person_with_seed("T Sym B", source_kind="test")
+
+    # call (b, a) explicitly reversed
+    r = enqueue_manual_candidate(b, a, reason="sym")
+    assert r["status"] == "queued"
+    canon_a, canon_b = sorted([a, b])
+    assert r["person_a"] == canon_a and r["person_b"] == canon_b
+
+
+def test_enqueue_manual_dedupes_against_existing_pair() -> None:
+    a = ensure_person_with_seed("T Dup A", source_kind="test")
+    b = ensure_person_with_seed("T Dup B", source_kind="test")
+
+    first = enqueue_manual_candidate(a, b, reason="first")
+    assert first["status"] == "queued"
+
+    # Try again — even with a different reason — must be a no-op.
+    second = enqueue_manual_candidate(a, b, reason="different_reason")
+    assert second["status"] == "noop"
+    assert second["reason"] == "already_handled"
+    assert second["existing_merge_candidate_id"] == first["merge_candidate_id"]
+    assert second["existing_status"] == "pending"
+
+    # And swapped order also dedupes.
+    third = enqueue_manual_candidate(b, a, reason="reversed")
+    assert third["status"] == "noop"
+
+
+def test_enqueue_manual_rejects_same_person() -> None:
+    a = ensure_person_with_seed("T Same", source_kind="test")
+    r = enqueue_manual_candidate(a, a, reason="oops")
+    assert r["status"] == "error"
+    assert r["reason"] == "same_person"
+
+
+def test_enqueue_manual_rejects_unknown_person_id() -> None:
+    a = ensure_person_with_seed("T Known A", source_kind="test")
+    r = enqueue_manual_candidate(a, "p_does_not_exist_xyz", reason="ghost")
+    assert r["status"] == "error"
+    assert r["reason"] == "person_not_found"
+    assert r["person_id"] == "p_does_not_exist_xyz"
+
+
+def test_enqueue_manual_auto_apply_merges_immediately() -> None:
+    a = ensure_person_with_seed("T Auto A", source_kind="test")
+    b = ensure_person_with_seed("T Auto B", source_kind="test")
+
+    r = enqueue_manual_candidate(a, b, reason="confident_same", auto_apply=True)
+    assert r["status"] == "merged"
+    kept, absorbed = sorted([a, b])
+    assert r["kept"] == kept and r["absorbed"] == absorbed
+
+    # The merge_candidate row transitioned to accepted.
+    mid = int(r["merge_candidate_id"])
+    row = fetch_one("SELECT status FROM merge_candidates WHERE id = ?", [mid])
+    assert row is not None and row["status"] == "accepted"
+    # absorbed person is gone
+    gone = fetch_one("SELECT person_id FROM persons WHERE person_id = ?", [absorbed])
+    assert gone is None
+
+
+def test_enqueue_manual_clamps_score_into_unit_range() -> None:
+    a = ensure_person_with_seed("T Clamp A", source_kind="test")
+    b = ensure_person_with_seed("T Clamp B", source_kind="test")
+    r = enqueue_manual_candidate(a, b, reason="score_test", score=7.5)
+    assert r["status"] == "queued"
+    # 7.5 clamps down to 1.0
+    assert r["score"] == 1.0
