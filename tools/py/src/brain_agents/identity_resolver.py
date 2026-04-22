@@ -8,7 +8,7 @@ import uuid
 from functools import lru_cache
 from typing import Any
 
-from brain_memory.structured import execute, query
+from brain_memory.structured import execute, fetch_one, query
 
 try:  # pragma: no cover - always available in prod (pinned in pyproject)
     import phonenumbers as _pn
@@ -396,9 +396,74 @@ def ensure_person_with_seed(
     return pid
 
 
+def _merge_aliases_payload(
+    *,
+    kept_primary: str,
+    kept_aliases_json: str,
+    absorbed_primary: str,
+    absorbed_aliases_json: str,
+) -> str:
+    """Return the new kept ``aliases_json`` after absorbing another person.
+
+    Combines ``kept.aliases`` + ``absorbed.primary_name`` + ``absorbed.aliases``,
+    dropping any token that case-insensitively matches ``kept_primary`` (redundant
+    with the primary name itself) and deduping case-insensitively while preserving
+    first-seen order. Absorbed's primary_name is added before absorbed's aliases
+    so it lands near the front of the list — this is the value users most often
+    search for via `who`.
+    """
+
+    def _as_list(raw: str) -> list[str]:
+        try:
+            val = json.loads(raw or "[]")
+        except (TypeError, ValueError):
+            return []
+        if not isinstance(val, list):
+            return []
+        return [str(x).strip() for x in val if str(x).strip()]
+
+    seen: set[str] = {kept_primary.strip().lower()}
+    result: list[str] = []
+    for candidate in [*_as_list(kept_aliases_json), absorbed_primary.strip(), *_as_list(absorbed_aliases_json)]:
+        if not candidate:
+            continue
+        key = candidate.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(candidate)
+    return json.dumps(result, ensure_ascii=False)
+
+
 def merge_persons(kept_person_id: str, absorbed_person_id: str, reason: str, detail: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Re-point foreign keys and delete absorbed person (T2 merge)."""
+    """Re-point foreign keys and delete absorbed person (T2 merge).
+
+    B-ING-1.11: before detaching the absorbed row, append its ``primary_name``
+    (and any pre-existing aliases) into ``kept.aliases_json`` so `who` / alias
+    search can still resolve the historical spelling / nickname / translation.
+    """
     detail = detail or {}
+
+    absorbed_row = fetch_one(
+        "SELECT primary_name, aliases_json FROM persons WHERE person_id = ?",
+        [absorbed_person_id],
+    )
+    kept_row = fetch_one(
+        "SELECT primary_name, aliases_json FROM persons WHERE person_id = ?",
+        [kept_person_id],
+    )
+    if absorbed_row is not None and kept_row is not None:
+        new_aliases_json = _merge_aliases_payload(
+            kept_primary=str(kept_row["primary_name"] or ""),
+            kept_aliases_json=str(kept_row["aliases_json"] or "[]"),
+            absorbed_primary=str(absorbed_row["primary_name"] or ""),
+            absorbed_aliases_json=str(absorbed_row["aliases_json"] or "[]"),
+        )
+        execute(
+            "UPDATE persons SET aliases_json = ? WHERE person_id = ?",
+            [new_aliases_json, kept_person_id],
+        )
+
     execute(
         """
         DELETE FROM person_identifiers AS pi

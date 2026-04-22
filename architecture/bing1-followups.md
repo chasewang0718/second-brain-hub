@@ -22,7 +22,7 @@ B-ING-1 本身已 ✅（248/248，snapshot `20260422-011824-bing1-ios-addressboo
 | **B-ING-1.7** | `ingest_events.backup` 字段回填最近一次 snapshot 路径/sha | LOW | 代码 | open |
 | **B-ING-1.8** | 手动处理 9 组真·重复 | MEDIUM | 数据 | **✅ 9/9 2026-04-22** |
 | **B-ING-1.10** | `identifiers-repair --dry-run` 不应写 `merge_candidates`（且应按 (person_a, person_b) 去重） | LOW | 代码 | open（0.1 验证时顺手发现，B-ING-1.8 pass-2 再次复现） |
-| **B-ING-1.11** | `merge_persons` 应自动把 absorbed.primary_name append 到 kept.aliases_json | MEDIUM | 代码 | open（B-ING-1.8 合并后 `who "Leyan"` / `"Hadi"` 等失效，已用 SQL 手动回填 4 条 alias 作为一次性补救） |
+| **B-ING-1.11** | `merge_persons` 应自动把 absorbed.primary_name append 到 kept.aliases_json | MEDIUM | 代码 | **✅ 2026-04-22** |
 
 ---
 
@@ -269,6 +269,41 @@ B-ING-0.1 落地后，`identifiers-repair --kinds phone` 在 T3 队列里凭 pho
 | Alice Klamer | 待判（phone vs email 两份，identifier 没重合） | 同上 |
 | Magda / Sara / unknown | 多半不同人 | 先留不动 |
 | 英华 张 | 一份空壳（`p_7ab52b139d73`，与本轮合并的 `p_5a6cbab7be21` 英华 无 shared identifier） | 删空壳（SQL）或 `enqueue-manual` 合并 |
+
+---
+
+## B-ING-1.11 · `merge_persons` 自动回填 alias ✅ 2026-04-22
+
+### 现象（修复前）
+
+B-ING-1.8 里，每次合并都要人肉把 absorbed.primary_name 手写进 kept.aliases_json，否则 `brain who "<absorbed_name>"` 会返回空。band-aid 段（上面那张 6 行表）就是证据。
+
+### 修复
+
+`identity_resolver.merge_persons` 在 `DELETE FROM persons` 之前，先：
+
+1. 取 absorbed 和 kept 的 `primary_name` / `aliases_json`；
+2. 走 `_merge_aliases_payload(...)`：把 kept.aliases + absorbed.primary_name + absorbed.aliases 合并，去掉和 kept.primary_name 大小写相等的冗余项，再按首次出现顺序去重；
+3. `UPDATE persons SET aliases_json = ? WHERE person_id = kept`。
+
+顺序：absorbed.primary_name 插在 absorbed.aliases 之前，因为它才是用户最可能用 `who` 搜的字面量。
+
+### 测试
+
+`tests/test_merge_candidates.py`：
+
+- `test_merge_aliases_payload_dedupes_and_drops_primary_echo`
+- `test_merge_aliases_payload_skips_alias_equal_to_kept_primary`（Hammond ← Hammond 不会污染 aliases）
+- `test_merge_aliases_payload_preserves_kept_then_absorbed_order`
+- `test_merge_persons_auto_aliases_absorbed_primary`（端到端：走完 merge 后 `aliases_json` 真的有值）
+- `test_merge_persons_carries_absorbed_aliases_forward`（absorbed 自己的历史 alias 不丢）
+- `test_merge_persons_skips_alias_when_names_equal`
+
+11/11 通过（含老 5 条 + 新 6 条）。
+
+### 影响
+
+下一次再合并同名 / 昵称 / 翻译名时，不需要再手写 SQL 回填。上面 B-ING-1.8 里的 6 行 band-aid 表格**不再产生新条目**（已写入的 6 条 alias 保持不变，作为历史事实）。
 
 ---
 
