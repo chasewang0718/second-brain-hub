@@ -21,6 +21,7 @@ B-ING-1 本身已 ✅（248/248，snapshot `20260422-011824-bing1-ios-addressboo
 | **B-ING-1.6** | 加 `merge-candidates enqueue-manual --pair` 子命令 | MEDIUM | 代码 | open |
 | **B-ING-1.7** | `ingest_events.backup` 字段回填最近一次 snapshot 路径/sha | LOW | 代码 | open |
 | **B-ING-1.8** | 手动处理 9 组真·重复 | MEDIUM | 数据 | **✅ 9/9 2026-04-22** |
+| **B-ING-1.9** | `contacts-ingest-ios` 幂等性真跑 | MEDIUM | 测试 | **✅ 2026-04-22** |
 | **B-ING-1.10** | `identifiers-repair --dry-run` 不应写 `merge_candidates`（且应按 (person_a, person_b) 去重） | LOW | 代码 | **✅ 2026-04-22** |
 | **B-ING-1.11** | `merge_persons` 应自动把 absorbed.primary_name append 到 kept.aliases_json | MEDIUM | 代码 | **✅ 2026-04-22** |
 
@@ -346,8 +347,33 @@ B-ING-1.8 里，每次合并都要人肉把 absorbed.primary_name 手写进 kept
 
 ---
 
-## B-ING-1.9 · `contacts-ingest-ios` 幂等性
+## B-ING-1.9 · `contacts-ingest-ios` 幂等性 ✅ 2026-04-22
 
-B-ING-1.8 重跑之前要确认：同一 `AddressBook.sqlitedb` 第二次 apply 不会重复写入 person / identifier。证据：`value_normalized` 上应有 UNIQUE 或 upsert 语义；`persons_created` 第二次应 ≈ 0 或只等于归一化修复后新合并/新增的差值。
+### 要回答的问题
+
+同一 `AddressBook.sqlitedb` 第二次 apply，会不会把每个联系人再复制一份？
+
+### 验证方法
+
+`tests/test_contacts_ingest_ios_idempotent.py` 用 tmp_path 造一份最小 iOS AddressBook schema（`ABPerson` + `ABMultiValue`，3 条联系人 + 2 phone + 2 email），跑两遍 `ingest_address_book_sqlite`：
+
+| pass | status | person_rows | persons_created | persons total | identifiers total |
+|---|---|---:|---:|---:|---:|
+| 1 | ok | 3 | **3** | +3 | +3 ios_contact_row + phones/emails |
+| 2 | ok | 3 | **0** | 不变 | 不变 |
+
+### 结论 ✅
+
+**幂等**。稳定键 `ios_contact_row:ios_ab:<rid>` + `resolve_identifier` short-circuit + `person_identifiers.ON CONFLICT (person_id, kind, value_normalized) DO NOTHING` 三层一起保证：
+
+- 第二次跑不新建 person。
+- 第二次跑不新建 identifier 行。
+- `dry_run` 测试顺手确认 dry-run 不写库。
+
+2/2 绿（`pytest tests/test_contacts_ingest_ios_idempotent.py`），在 B-ING-1.5 装的 `BRAIN_DB_PATH` 隔离 fixture 下跑，对生产库无任何影响。
+
+### 已知小气味（不阻塞）
+
+`stats["identifiers_added"]` 按 `register_identifier` 返回 `status="ok"` 计数，而 `ok` 在 `ON CONFLICT DO NOTHING` 时也返回 —— 所以第一次真跑时该计数会**虚高**（包括 no-op 的 upsert）。不影响幂等结论，但 B-ING-3 WhatsApp 上线前可以顺手修成按实际影响行数计。
 
 若不幂等 → 在 B-ING-1.8 之前补上 "已存在的 `value_normalized` 不再新建 person，而是挂到既有 person" 的逻辑。
