@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,22 @@ from brain_core.config import load_paths_config
 
 
 def _db_path() -> Path:
+    """Resolve the DuckDB file.
+
+    Precedence:
+    1. ``BRAIN_DB_PATH`` env var (non-empty) — used by pytest (B-ING-1.5) to
+       point the whole stack at a throwaway tmp file so test fixtures like
+       ``ensure_person_with_seed("T Reject A", ...)`` never leak into the
+       production telemetry DB again.
+    2. ``paths.yaml`` → ``telemetry_logs_dir`` / ``brain-telemetry.duckdb``.
+    """
+    override = os.environ.get("BRAIN_DB_PATH", "").strip()
+    if override:
+        path = Path(override).expanduser()
+        parent = path.parent
+        if str(parent) and parent != Path():
+            parent.mkdir(parents=True, exist_ok=True)
+        return path
     logs_dir = Path(load_paths_config()["paths"]["telemetry_logs_dir"])
     logs_dir.mkdir(parents=True, exist_ok=True)
     return logs_dir / "brain-telemetry.duckdb"

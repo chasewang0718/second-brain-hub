@@ -17,7 +17,7 @@ B-ING-1 本身已 ✅（248/248，snapshot `20260422-011824-bing1-ios-addressboo
 |------|------|--------|------|------|
 | **B-ING-0.1** | Phone normalizer: NL 本地 `06…` → `+316…`（通过 `phonenumbers` + `default_region`） | **HIGH** | 代码 | **✅ 2026-04-22** |
 | **B-ING-1.4** | `ios_backup_locator` 选优：不要选空子库 | MEDIUM | 代码 | **✅ 2026-04-22** |
-| **B-ING-1.5** | 清理 DuckDB 里的 T-fixture 污染（174 persons + 8 merge_log） | MEDIUM | 数据 + 测试隔离 | open |
+| **B-ING-1.5** | 清理 DuckDB 里的 T-fixture 污染 + pytest 真隔离 | MEDIUM | 数据 + 测试隔离 | **✅ 2026-04-22** |
 | **B-ING-1.6** | 加 `merge-candidates enqueue-manual --pair` 子命令 | MEDIUM | 代码 | open |
 | **B-ING-1.7** | `ingest_events.backup` 字段回填最近一次 snapshot 路径/sha | LOW | 代码 | open |
 | **B-ING-1.8** | 手动处理 9 组真·重复 | MEDIUM | 数据 | **✅ 9/9 2026-04-22** |
@@ -122,67 +122,53 @@ brain identifiers-repair --kinds phone --dry-run / --apply
 
 ---
 
-## B-ING-1.5 · 清理 DuckDB 里的 T-fixture 污染
+## B-ING-1.5 · T-fixture 污染清理 + pytest 隔离 ✅ 2026-04-22
 
-### 现状（2026-04-22 扫描）
+### 现象（修复前）
 
-| 表 | T-fixture 引用数 |
-|----|------------------|
-| `persons`（primary_name `LIKE 'T %'`） | **174** |
-| `merge_log.kept_person_id` | **8** |
-| `merge_log.absorbed_person_id` | 0 |
-| `person_identifiers.person_id` | 0 |
-| `interactions.person_id` | 0 |
-| `open_threads.person_id` | 0 |
-| `person_notes.person_id` | 0 |
-| `person_insights.person_id` | 0 |
-| `merge_candidates` | **未确认**（列名不叫 `person_id`，下方扫描脚本需扩展） |
+早期 merge-candidates / identity 测试（`ensure_person_with_seed("T Reject A", ...)` 等）直接跑在 `config/paths.yaml → telemetry_logs_dir → brain-telemetry.duckdb` 上，结果：
 
-T 前缀：`T Bad A/B ×29`、`T Reject A/B ×29`、`T Acc A/B ×13-16`、`T Keep A/B ×13-16`。**应来自 merge_candidates 测试**，早期测试跑在真 telemetry.duckdb 上留下的。
+- **204** 个 `T *` / `Repair Test Person` / `Wx Repair` 残留 person 行（含 `T Bad A/B ×64`、`T Reject A/B ×64`、`T Acc A/B ×32`、`T Keep A/B ×32`、`T Alias/Carry ×2` 等）。
+- **37** 个 orphan `merge_candidates`（`person_a` / `person_b` 指向已被 test teardown 删掉的 id）。
+- **test_context_for_meeting_markdown_contains_shared_identifier_section** 因为 prod 里多了个 `Alice Klamer`，`who("Alice")` 不稳定，时绿时红。
 
-### 清理前补齐扫描
+### 修复
 
-```sql
-SELECT column_name, data_type
-FROM duckdb_columns()
-WHERE schema_name='main' AND table_name='merge_candidates'
-ORDER BY column_index;
-```
+**1. 代码：`BRAIN_DB_PATH` 环境变量覆盖**
 
-若 `merge_candidates` 含如 `person_a`, `person_b` 或 `candidate_person_id`、`target_person_id` 这类非 `*person_id*` 命名的 FK，要先清完再删 persons。
+`tools/py/src/brain_memory/structured.py::_db_path()` 新增 env 优先级：`BRAIN_DB_PATH` 非空时走它，否则回落到 `paths.yaml`。所有 execute / query / fetch_one / ensure_schema 自动跟随。
 
-### 清理 SQL（确认后按事务执行）
+**2. 测试：pytest session-scoped autouse fixture**
 
-```sql
-BEGIN TRANSACTION;
+`tools/py/tests/conftest.py` 加 `_isolated_duckdb_path` fixture —— `tmp_path_factory` 开一份 `test.duckdb`，写进 `BRAIN_DB_PATH`，teardown 还原。从此 pytest 跑什么都打不到真库。
 
--- 1) merge_log 里引用 T 的记录
-DELETE FROM merge_log
-WHERE kept_person_id IN (SELECT person_id FROM persons WHERE primary_name LIKE 'T %')
-   OR absorbed_person_id IN (SELECT person_id FROM persons WHERE primary_name LIKE 'T %');
+**3. 数据：一次性清扫脚本**
 
--- 2) merge_candidates（填上真实列名后再执行；示例）
--- DELETE FROM merge_candidates
--- WHERE person_a IN (SELECT person_id FROM persons WHERE primary_name LIKE 'T %')
---    OR person_b IN (SELECT person_id FROM persons WHERE primary_name LIKE 'T %');
+安全删除条件：`primary_name LIKE 'T %'` / 已知 fixture 名 **并且** `NOT EXISTS (person_identifiers)`，避免误删真联系人（`Tim / Tahir Vladi / Ties / Tim Van Zuijlen / Trinh / T..a Froger` 全都保留）。
 
--- 3) persons 本体（T-fixture 在其他业务表已确认为 0 引用）
-DELETE FROM persons WHERE primary_name LIKE 'T %';
+### 执行
 
-COMMIT;
-```
+| 阶段 | snapshot | sha |
+|---|---|---|
+| pre-cleanup | `20260422-082747-bing15-pre-cleanup.duckdb` | `cdec46ba…` |
+| post-cleanup | `20260422-083032-bing15-post-cleanup.duckdb` | `9b691472…` |
 
-**前置**：跑之前强制新 snapshot。
+- `persons` **411 → 213**（-198；T Bad ×64、T Reject ×64、T Acc ×32、T Keep ×32、T Alias ×2、T Carry ×2、T Eq Name ×2）
+- `person_identifiers` **459 → 459**（不变，证明删的都是裸 person 行，无真数据牵连）
+- `merge_candidates` **37 → 0**（全部为 orphan）
+- Kuzu graph 重建：**213 / 459 / 456** has_identifier。
 
-### 预防
+剩余 213 里 211 有 identifier，2 无的是 demo seed `p_alice` (Alice Zhang) 和 `p_bob` (Bob van Dijk)，`seed_demo_people_data()` 的 idempotent 固定行，有意保留。
 
-所有 `merge_candidates` / `merge_log` 相关测试必须用**临时 DuckDB 文件 + `monkeypatch`** 或 **`:memory:` 连接**，严禁打到 `config/paths.yaml` 指向的真 telemetry 库。补 linter-style check 或测试里断言 `conn.filename` 是临时路径。
+### 回归
 
-### 验收
+- 全量 `pytest tests/` 在 `BRAIN_DB_PATH` 指向 tmp 路径下 **217/217** 通过，包含之前偶尔 fail 的 `test_context_for_meeting_markdown_contains_shared_identifier_section`。
+- 真库计数 `prod scan`：`T *` 模式 0 行，`test_*` reason 的 merge_log 6 行（历史事实，保留）。
 
-- 清理后 `SELECT COUNT(*) FROM persons` 从 396 → 222（396 − 174）。
-- `merge-candidates sync-from-graph --dry-run` 结果中无 `T ` 开头的 candidate。
-- `pytest` 全绿，且任何 merge_candidates 测试结束后真 telemetry.duckdb `LIKE 'T %'` 计数为 0。
+### 延伸（不阻塞本条收尾）
+
+- `conftest.py` 目前是 **session** 作用域，测试间不做 TRUNCATE。若未来交叉测试需要完全隔离，再加 function-scope 的 reset fixture。
+- `ensure_person_with_seed` 仍允许 caller 指向非-test 名字；防呆靠 fixture 本身。
 
 ---
 
