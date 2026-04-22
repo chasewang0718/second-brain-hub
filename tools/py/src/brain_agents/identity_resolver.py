@@ -138,8 +138,16 @@ def _repair_identifier_kind_group(
         "updated": 0,
         "deleted_duplicate": 0,
         "merge_candidates": 0,
+        "merge_candidate_collisions": 0,
+        "merge_candidate_skipped_existing": 0,
         "dry_run": dry_run,
     }
+    # B-ING-1.10: pair-level dedupe within this run. Under non-dry-run the DB
+    # existence check is authoritative, but under dry-run (no commits) we also
+    # need to remember pairs we've seen earlier in the same loop to avoid
+    # double-counting "would enqueue" for several colliding rows on the same pair.
+    seen_pairs: set[tuple[str, str]] = set()
+
     for r in rows:
         stats["rows_scanned"] += 1
         oid = int(r["id"])
@@ -174,31 +182,35 @@ def _repair_identifier_kind_group(
             [kind_k, new_norm, pid],
         )
         opids = [str(x["person_id"]) for x in others]
-        if len(opids) > 1:
-            _enqueue_merge_candidate(
+        if opids:
+            ambiguous = len(opids) > 1
+            other = opids[0]
+            pair = tuple(sorted([pid, other]))
+            stats["merge_candidate_collisions"] += 1
+            if pair in seen_pairs:
+                stats["merge_candidate_skipped_existing"] += 1
+                continue
+            seen_pairs.add(pair)
+            detail: dict[str, Any] = {
+                "kind": kind_k,
+                "new_norm": new_norm,
+                "old_normalized": old_norm,
+                "row_id": oid,
+            }
+            if ambiguous:
+                detail["owners"] = opids
+            enqueued = _enqueue_merge_candidate(
                 pid,
-                opids[0],
-                0.45,
-                f"{reason_prefix}_repair_ambiguous",
-                {
-                    "kind": kind_k,
-                    "new_norm": new_norm,
-                    "old_normalized": old_norm,
-                    "row_id": oid,
-                    "owners": opids,
-                },
+                other,
+                0.45 if ambiguous else 0.6,
+                f"{reason_prefix}_repair_{'ambiguous' if ambiguous else 'collision'}",
+                detail,
+                dry_run=dry_run,
             )
-            stats["merge_candidates"] += 1
-            continue
-        if len(opids) == 1:
-            _enqueue_merge_candidate(
-                pid,
-                opids[0],
-                0.6,
-                f"{reason_prefix}_repair_collision",
-                {"kind": kind_k, "new_norm": new_norm, "old_normalized": old_norm, "row_id": oid},
-            )
-            stats["merge_candidates"] += 1
+            if enqueued:
+                stats["merge_candidates"] += 1
+            else:
+                stats["merge_candidate_skipped_existing"] += 1
             continue
 
         if not dry_run:
@@ -258,7 +270,15 @@ def run_identifiers_repair(*, kinds: set[str], dry_run: bool = False) -> dict[st
     if unknown:
         return {"status": "error", "reason": "unknown_kinds", "unknown": sorted(unknown)}
     out: dict[str, Any] = {"dry_run": dry_run, "kinds_requested": sorted(kinds), "results": {}}
-    totals = {"rows_scanned": 0, "skipped_unchanged": 0, "updated": 0, "deleted_duplicate": 0, "merge_candidates": 0}
+    totals = {
+        "rows_scanned": 0,
+        "skipped_unchanged": 0,
+        "updated": 0,
+        "deleted_duplicate": 0,
+        "merge_candidates": 0,
+        "merge_candidate_collisions": 0,
+        "merge_candidate_skipped_existing": 0,
+    }
     if "phone" in kinds:
         st = repair_phone_identifiers(dry_run=dry_run)
         out["results"]["phone"] = st
@@ -306,9 +326,35 @@ def _enqueue_merge_candidate(
     score: float,
     reason: str,
     detail: dict[str, Any],
-) -> None:
+    *,
+    dry_run: bool = False,
+) -> bool:
+    """Enqueue a merge_candidates row for a ``(person_a, person_b)`` pair.
+
+    B-ING-1.10 guarantees:
+
+    1. **Pair-dedupe.** The pair is always normalized to ``(smaller_id, larger_id)``
+       and a new row is inserted only when no existing row targets the same pair
+       (any status). Prevents the "N rows per pair" spam observed during B-ING-1.8
+       pass-2 where multiple stale ``06…`` numbers on the same person all fired
+       independent collisions against the same survivor.
+    2. **Honor ``dry_run``.** Under ``dry_run=True`` this never writes to the DB.
+       The existence check still runs so callers can count would-enqueue pairs
+       accurately.
+
+    Returns ``True`` when a row was inserted (or *would have been* inserted under
+    dry-run), ``False`` when the pair was already present and we skipped.
+    """
     if person_a > person_b:
         person_a, person_b = person_b, person_a
+    existing = fetch_one(
+        "SELECT id FROM merge_candidates WHERE person_a = ? AND person_b = ? LIMIT 1",
+        [person_a, person_b],
+    )
+    if existing is not None:
+        return False
+    if dry_run:
+        return True
     execute(
         """
         INSERT INTO merge_candidates (person_a, person_b, score, reason, detail_json)
@@ -316,6 +362,7 @@ def _enqueue_merge_candidate(
         """,
         [person_a, person_b, score, reason, json.dumps(detail, ensure_ascii=False)],
     )
+    return True
 
 
 def register_identifier(

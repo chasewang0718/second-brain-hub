@@ -21,7 +21,7 @@ B-ING-1 本身已 ✅（248/248，snapshot `20260422-011824-bing1-ios-addressboo
 | **B-ING-1.6** | 加 `merge-candidates enqueue-manual --pair` 子命令 | MEDIUM | 代码 | open |
 | **B-ING-1.7** | `ingest_events.backup` 字段回填最近一次 snapshot 路径/sha | LOW | 代码 | open |
 | **B-ING-1.8** | 手动处理 9 组真·重复 | MEDIUM | 数据 | **✅ 9/9 2026-04-22** |
-| **B-ING-1.10** | `identifiers-repair --dry-run` 不应写 `merge_candidates`（且应按 (person_a, person_b) 去重） | LOW | 代码 | open（0.1 验证时顺手发现，B-ING-1.8 pass-2 再次复现） |
+| **B-ING-1.10** | `identifiers-repair --dry-run` 不应写 `merge_candidates`（且应按 (person_a, person_b) 去重） | LOW | 代码 | **✅ 2026-04-22** |
 | **B-ING-1.11** | `merge_persons` 应自动把 absorbed.primary_name append 到 kept.aliases_json | MEDIUM | 代码 | **✅ 2026-04-22** |
 
 ---
@@ -269,6 +269,44 @@ B-ING-0.1 落地后，`identifiers-repair --kinds phone` 在 T3 队列里凭 pho
 | Alice Klamer | 待判（phone vs email 两份，identifier 没重合） | 同上 |
 | Magda / Sara / unknown | 多半不同人 | 先留不动 |
 | 英华 张 | 一份空壳（`p_7ab52b139d73`，与本轮合并的 `p_5a6cbab7be21` 英华 无 shared identifier） | 删空壳（SQL）或 `enqueue-manual` 合并 |
+
+---
+
+## B-ING-1.10 · `identifiers-repair` dry-run 纯净 + pair 去重 ✅ 2026-04-22
+
+### 现象（修复前）
+
+1. `brain identifiers-repair --dry-run` 照样往 `merge_candidates` 表里 INSERT 行 —— dry-run 应该只读。
+2. B-ING-1.8 实跑时，9 对真·重复被拆成 36 行 `phone_repair_collision` / `phone_repair_ambiguous`（多条 legacy `06…` 号都朝同一个 survivor 撞），人工还得用 SQL 按 `(person_a, person_b)` 挑最小 id 去重到 9 行再 accept。
+
+### 修复
+
+`tools/py/src/brain_agents/identity_resolver.py::_enqueue_merge_candidate` 改签名：
+
+- 统一把 pair 规整为 `(smaller_id, larger_id)`；
+- `SELECT` 检查该 pair 是否已有任意状态的行，有则直接 return `False`；
+- 新增 `dry_run` kwarg，dry-run 时只返回判断不 INSERT；
+- 返回 `bool`（`True` = 真写了 / dry-run 下"会写"；`False` = 已存在被跳过）。
+
+`_repair_identifier_kind_group` 循环里再加一层 run 内部 `seen_pairs` 兜底（因为 dry-run 不 commit，DB 检查看不到同 run 前几次已"会写"的 pair），然后：
+
+- `stats["merge_candidates"]` 改为 **真正会新增的 pair 数**（不再是 per-row collision 数）；
+- 新增 `merge_candidate_collisions`（per-row 命中次数，用于诊断）；
+- 新增 `merge_candidate_skipped_existing`（被去重跳过的次数）。
+
+### 测试
+
+`tests/test_identity_repair.py`：
+
+- `test_repair_dry_run_does_not_write_merge_candidates`：dry-run 前后 `merge_candidates` 表行数相等；
+- `test_repair_pair_dedupe_multiple_rows_same_pair`：A 一行 + B 三行 uppercase twin 撞 A → 只生成 **1** 个 candidate，`collisions>=3`，`skipped_existing>=2`；
+- `test_repair_pair_dedupe_second_run_is_noop`：第一次真跑后第二次是 no-op，`merge_candidates=0`。
+
+16/16（含 `test_merge_candidates.py` 的 11 条）通过。
+
+### 实况冒烟（真库）
+
+B-ING-1.8 后所有 identifier 已 canonical，全量 dry-run `rows_scanned=211 / skipped_unchanged=211`，`merge_candidates` 表 `pre=37 post=37`，零副作用。下次真跑新 ingest 时才是 1.10 真正发挥价值的时候。
 
 ---
 
