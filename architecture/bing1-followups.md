@@ -20,8 +20,9 @@ B-ING-1 本身已 ✅（248/248，snapshot `20260422-011824-bing1-ios-addressboo
 | **B-ING-1.5** | 清理 DuckDB 里的 T-fixture 污染（174 persons + 8 merge_log） | MEDIUM | 数据 + 测试隔离 | open |
 | **B-ING-1.6** | 加 `merge-candidates enqueue-manual --pair` 子命令 | MEDIUM | 代码 | open |
 | **B-ING-1.7** | `ingest_events.backup` 字段回填最近一次 snapshot 路径/sha | LOW | 代码 | open |
-| **B-ING-1.8** | 手动处理 **9** 组真·重复（0.1 之后由 repair 自动识别到） | MEDIUM | 数据 | open，已在 `merge_candidates` 排队待人工 accept/reject |
-| **B-ING-1.10** | `identifiers-repair --dry-run` 不应写 `merge_candidates`（且应按 (person_a, person_b) 去重） | LOW | 代码 | open（0.1 验证时顺手发现） |
+| **B-ING-1.8** | 手动处理 9 组真·重复 | MEDIUM | 数据 | **7/9 ✅ 2026-04-22**；2 组昵称型（`悦取/老婆`、`英华/小华`）留 pending 待用户确认 |
+| **B-ING-1.10** | `identifiers-repair --dry-run` 不应写 `merge_candidates`（且应按 (person_a, person_b) 去重） | LOW | 代码 | open（0.1 验证时顺手发现，B-ING-1.8 pass-2 再次复现） |
+| **B-ING-1.11** | `merge_persons` 应自动把 absorbed.primary_name append 到 kept.aliases_json | MEDIUM | 代码 | open（B-ING-1.8 合并后 `who "Leyan"` / `"Hadi"` 等失效，已用 SQL 手动回填 4 条 alias 作为一次性补救） |
 
 ---
 
@@ -211,21 +212,48 @@ brain merge-candidates enqueue-manual \
 
 ---
 
-## B-ING-1.8 · 手动处理 9 组真·重复
+## B-ING-1.8 · 手动处理重复 persons — 7/9 ✅ 2026-04-22
 
-**前置**：B-ING-0.1（归一化）+ B-ING-1.6（手动入队）完成，再执行。执行顺序：
+B-ING-0.1 落地后，`identifiers-repair --kinds phone` 在 T3 队列里凭 phone 归一化发现 **9 对** `phone_repair_collision`。**7 对已 accept 合并**，**2 对停在 pending 等你确认**（都是昵称 / 关系标签型，自动判断不靠谱）。
 
-1. 重跑 `contacts-ingest-ios --dry-run --db "...\31\31bb..."`，确认归一化修复后 `person_rows` 降到 241 左右（减去 Hammond/Jerrel/Patricia 三对，应减 3；但再跑 ingest 需确认是幂等 upsert，否则见 B-ING-1.9）。
-2. 对剩余组逐个决定：
+### 已合并（2026-04-22，snapshot `20260422-074832-bing01-pre-7-accepts.duckdb` sha `af3be7d2…`）
 
-    | 名字 | 人工决定 | 动作 |
-    |------|----------|------|
-    | Cheng Wang | 同人 | `enqueue-manual --pair p_0788eefdd6c4 p_7e885752da1c` → accept |
-    | Alice Klamer | 待判（phone vs email 两份） | 待人工看 iOS 原卡 |
-    | Magda | 可能不同人（NL vs US） | 先留，不动 |
-    | Sara | 可能不同人（DE vs NL） | 先留，不动 |
-    | unknown | 多半不同人 | 先留，不动 |
-    | 英华 张 | 一份空壳 | 删除空壳（直接 SQL）或 enqueue-manual 合并 |
+| mc.id | kept → absorbed | 备注 |
+|-------|----------------|------|
+| 217 | `p_8b8db0a78fec` Harry Schortinghuis ← `p_31eb934ae096` Harry | `--keep` 保留更完整的姓名 |
+| 218 | `p_1872d6e1a674` Patricia ← `p_7bb0b255b73d` Patricia | 默认（同名） |
+| 219 | `p_491c30816955` Lunsing Kazemier ← `p_adbc5eb59074` Lunsing Cazemier | 拼写差异，保留 "Kazemier" |
+| 220 | `p_b07f2fdc42ab` Jerrel ← `p_b620dcef885d` Jerrel | 默认 |
+| 221 | `p_16d38b5b1f89` Hady ← `p_b8a1db3ab6af` Hadi | 拼写差异 |
+| 222 | `p_0e2bf6170bfe` 乐燕 ← `p_4f001edc22bd` Leyan | 中文 / 拼音 |
+| 223 | `p_0ac7536db641` Hammond ← `p_1eba139a22ef` Hammond | 默认 |
+
+Pass-2 `identifiers-repair --kinds phone` 顺手清掉 **7 条 `deleted_duplicate`**（absorbed 行里的 `0615156595` 等 legacy 归一化形式，被 kept 行的 `31615156595` 压掉）。
+
+副作用：Lunsing Cazemier / Hadi / Leyan / Harry 四个被 absorbed 的名字作为搜索入口丢失，已用 SQL 把它们挂回对应 kept 的 `aliases_json`。**此副作用源于 `merge_persons` 不自动回填 alias** → 新开 **B-ING-1.11**。
+
+最终数：`persons` 402 → **395**（-7），`person_identifiers` 468 → **461**（-7）。
+
+### 仍在 T3 队列待人工审（status=pending）
+
+| mc.id | A | B | 你的判断 |
+|-------|---|---|----------|
+| 224 | `p_5a6cbab7be21` 英华 | `p_ec9cb3a33938` 小华 | 昵称？ |
+| 225 | `p_2b1cb206bb2b` 悦取 | `p_b1719d0e1a64` 老婆 | 关系标签？ |
+
+操作：
+- 合 → `brain merge-candidates accept 224`（如需指定 kept 用 `--keep <person_id>`）；accept 后建议回填 alias（在 B-ING-1.11 落地前 SQL 手写）。
+- 拒 → `brain merge-candidates reject 224`。
+- 保留现状 → 不动即可；pending 永远不会自动动。
+
+### Pre-0.1 设想的其他重复组（历史 scope，非本轮 repair 发现）
+
+| 名字 | 人工决定 | 动作 |
+|------|----------|------|
+| Cheng Wang | 同人（personal / business email） | 等 **B-ING-1.6**（`enqueue-manual --pair`）落地再处理 |
+| Alice Klamer | 待判（phone vs email 两份，identifier 没重合） | 同上 |
+| Magda / Sara / unknown | 多半不同人 | 先留不动 |
+| 英华 张 | 一份空壳 | 删空壳（SQL）或 `enqueue-manual` 合并 |
 
 ---
 
