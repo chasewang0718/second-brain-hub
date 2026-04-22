@@ -2,9 +2,43 @@
 title: second-brain-hub 优化路线图
 status: active
 created: 2026-04-20
-updated: 2026-04-21
+updated: 2026-04-22
 authoritative_at: C:\dev-projects\second-brain-hub\architecture\ROADMAP.md
 ---
+
+> **📌 2026-04-22 状态快照** · 每个 Phase 内的 `[ ]` 勾选从 v5 起**再没同步**，但代码早已交付。
+> 真实完成度以这张表为准（每行给出"最强证据"，不以 `[ ]` 为准）：
+>
+> | Phase | 现状 | 证据 |
+> |---|---|---|
+> | F0 目录改名 | ✅ 已交付 | `config/paths.yaml` 用 `D:\second-brain-content` / `D:\second-brain-assets`；生产 DuckDB 在新路径跑通 |
+> | F1 Python + MCP 骨架 | ✅ 已交付 | `tools/py/` uv 工程；`brain_mcp/server.py` 挂 15+ 工具；`brain_cli/main.py` Typer CLI |
+> | F2 Git 安全网 | ✅ 已交付 | `brain_core/safety.py`: `AutoCommitter` / `BackupBrancher` / `restore_*` / `safety_status` |
+> | F3 记忆层 | ✅ 已交付 | `brain_memory/{vectors,graph,structured}.py` 三 DB 门面；Kuzu POC 29 ms FoF；LanceDB 向量；DuckDB 表齐全 |
+> | A1 ask-engine | ✅ 已交付 | `brain_agents/ask.py` + `brain ask` CLI + `ask_*` MCP 工具 |
+> | A2 text-inbox | ✅ 已交付 | `brain_agents/text_inbox.py` + `brain text-inbox-ingest` + 实体抽取→`person_notes` |
+> | A3 file-inbox（含 PS 弃用） | ✅ 已交付 | `{file,image,audio}_inbox.py`；PS pipeline 2026-04-21 整体删除（见 12 条变更日志） |
+> | A4 write-assist | ✅ 已交付 | `brain_agents/write_assist.py` + provenance 脚注 + `brain write` |
+> | A5 people-engine | 🟡 代码齐 / 真数据未跑 | `people.py` + `who/overdue/context_for_meeting` CLI + MCP；**但**生产库只有 **4 人** 有交互记录（见"🟡 真数据缺口"段） |
+> | E1 结构自优化 | ✅ 已交付 | `brain_agents/structure.py` + `tools/housekeeping/brain-weekly-maintenance.ps1`（每周日 23:00） |
+> | E2 主动化 | 🟡 骨架齐 / 调度未启 | `brain_agents/digest.py` + `brain daily-digest`；Windows 任务计划**尚未注册**（E1 有，E2 没有） |
+>
+> **🟡 真数据缺口 · 最需要补的一块**
+>
+> B-ING-1 iOS AddressBook 已真跑（213 人 / 453 identifiers / 2026-04-22 全部 follow-up 关档）。但 A5 的"人际闭环"还差：
+>
+> - **B-ING-3 WhatsApp 真跑**：代码齐，等用户挑时间。
+> - **B-ING-4 WeChat 真跑**：decoder 齐，但 Win11 商店版本地 DB 解密未上（runbook 推荐 iPhone 未加密备份路径）。
+> - **B-ING-5 Caps+D 文本 → person_notes**：已接通，但没被日常使用。
+> - **A5 评估**：`brain who` / `brain overdue` / `brain context-for-meeting` 没跑过 eval。现阶段 213 人全部来自 iOS 通讯录，没有交互数据，overdue 永远返回 0。
+>
+> **方向校正**：F0–A4 的工程底盘已经**过剩**（pytest 234、MCP 工具 15+、Kuzu + LanceDB + DuckDB 三 DB 全接通），短板在于 #1 文本 inbox / #3 写作助手 / #4 索引助手的**真用户使用证据**——代码齐，但没评估、没被日常用。下一阶段应优先：
+>
+> 1. 跑完 B-ING-3 / B-ING-5 → 让 A5 people-engine 有真数据。
+> 2. 给 A1 / A2 / A4 各写一份 eval（pytest + promptfoo）→ 验证产出质量。
+> 3. 再考虑 E2 主动化的任务计划注册（否则 daily-digest 没人看）。
+>
+> 下方每个 Phase 内的 `[ ]` 勾选**请忽略**；以本表 + 各 runbook 为准。待 B-ING-3/4/5 + eval 交付后，统一把 ROADMAP 升级到 v6。
 
 # second-brain-hub 优化路线图 (v5 · 零预算全自主)
 
@@ -164,7 +198,7 @@ D:\second-brain-assets\             (非 Git, Tier B 二进制)
 
 ## 3. 路线图 (v5 Phase 结构)
 
-### Phase F0 · 目录改名 (30 分钟, 手工 + 一次性)
+### Phase F0 · 目录改名 ✅ (30 分钟, 手工 + 一次性)
 
 由用户在干净 PS 里执行物理改名, AI 更新所有仓内引用.
 
@@ -182,7 +216,7 @@ D:\second-brain-assets\             (非 Git, Tier B 二进制)
 
 ---
 
-### Phase F1 · Python + MCP Server 骨架 (2-3 周末)
+### Phase F1 · Python + MCP Server 骨架 ✅ (2-3 周末)
 
 搭 Python 主工程 + MCP server, Cursor/Claude Desktop 可调.
 
@@ -203,7 +237,7 @@ D:\second-brain-assets\             (非 Git, Tier B 二进制)
 
 ---
 
-### Phase F2 · Git 安全网 (1-2 周末)
+### Phase F2 · Git 安全网 ✅ (1-2 周末)
 
 所有 agent 写入 auto-commit + backup + restore.
 
@@ -224,7 +258,7 @@ D:\second-brain-assets\             (非 Git, Tier B 二进制)
 
 ---
 
-### Phase F3 · 记忆层 (2-3 周末)
+### Phase F3 · 记忆层 ✅ (2-3 周末)
 
 三 DB 就位 + 全量 embed.
 
@@ -244,7 +278,7 @@ D:\second-brain-assets\             (非 Git, Tier B 二进制)
 
 ---
 
-### Phase A1 · ask-engine (1-2 周末, 最先做)
+### Phase A1 · ask-engine ✅ (1-2 周末, 最先做)
 
 暴露统一检索 API.
 
@@ -261,7 +295,7 @@ D:\second-brain-assets\             (非 Git, Tier B 二进制)
 
 ---
 
-### Phase A2 · text-inbox agent (2-3 周末)
+### Phase A2 · text-inbox agent ✅ (2-3 周末)
 
 Caps+D 贴任何文本 → 零操作归档.
 
@@ -282,7 +316,7 @@ Caps+D 贴任何文本 → 零操作归档.
 
 ---
 
-### Phase A3 · file-inbox agent (2-3 周末, 包含 PS 弃用)
+### Phase A3 · file-inbox agent ✅ (2-3 周末, 包含 PS 弃用)
 
 多模态文件自动归档, **并删除老 PS pipeline**.
 
@@ -307,7 +341,7 @@ Caps+D 贴任何文本 → 零操作归档.
 
 ---
 
-### Phase A4 · write-assist (3-5 周末)
+### Phase A4 · write-assist ✅ (3-5 周末)
 
 四层知识模型 + 7 行业技巧.
 
@@ -332,7 +366,7 @@ Caps+D 贴任何文本 → 零操作归档.
 
 ---
 
-### Phase A5 · people-engine (3-5 周末, 依赖 F3 Kuzu)
+### Phase A5 · people-engine 🟡 (3-5 周末, 依赖 F3 Kuzu) · 代码齐、真数据未跑（等 B-ING-3/4/5）
 
 Monica/Dex 式人际关系助手.
 
@@ -355,7 +389,7 @@ Monica/Dex 式人际关系助手.
 
 ---
 
-### Phase E1 · 结构自优化 (2-3 周末, 依赖 A1+A2+F2)
+### Phase E1 · 结构自优化 ✅ (2-3 周末, 依赖 A1+A2+F2)
 
 **自动执行**, git 兜底.
 
@@ -370,7 +404,7 @@ Monica/Dex 式人际关系助手.
 
 ---
 
-### Phase E2 · 主动化 (2 周末)
+### Phase E2 · 主动化 🟡 (2 周末) · `digest.py` 就位、Windows 任务计划未注册
 
 每日/每周自动推送.
 
@@ -504,6 +538,8 @@ Monica/Dex 式人际关系助手.
 | 2026-04-21 | — | **F3 `graph-rebuild-if-stale`**: 新增 `brain_agents/graph_build.graph_staleness` + `rebuild_if_stale`（对比 Kuzu vs DuckDB mtime；支持 `--max-age-hours` 墙钟阈值和 `--force`）；CLI `brain graph-rebuild-if-stale` + `brain graph-staleness`；E1 周任务改走这条便宜路径（fresh 时只 stat 文件；stale 才 ~7s 重建）；9 个新 pytest 覆盖 missing / no_duckdb / duckdb_newer / fresh / older_than_max / 不重建 fresh / 重建 stale / force / build 抛错时 skipped。全量 **78 passed**。 |
 | 2026-04-21 | — | **`tools/asset/` 迁移评估文档**: 产出 `architecture/asset-migration-plan.md`——清点 5 个 PS 脚本（migrate / source-cleanup / dedup / stats / overview-cards）、当前 Python 覆盖率（~0-60%）、6 批推荐顺序（B1 stats+dedup → B2 删 overview-cards → B3 migrate → B4 source-cleanup → B5 profile → B6 删 dir），含 "绝对不做的事" 和并跑对拍 3 周的中间态约定。**不动代码**，仅评估。 |
 | 2026-04-21 | — | **真实 ingest 上线范围文档**: 产出 `architecture/real-ingest-scope.md`——4 条线（iOS AddressBook / WhatsApp / WeChat / remark）代码就绪但全部未跑真数据，列出 4 个公共前置（PC-1 备份快照 / PC-2 T3 阈值演练 / PC-3 jsonl ingest 日志 / PC-4 事务包裹）、7 步上线路线（B-ING-0 ~ B-ING-6，~3 工日 / 跨 1 周）、绝对不做清单（不本地解密 / 不跨线混跑 / 不回溯 1 年前消息 / 用户不在不 apply）。**不动代码**，等用户说"开 B-ING-0"再起。 |
+| 2026-04-22 | — | **ROADMAP 对齐**: 顶部加"2026-04-22 状态快照"表 + 每 Phase 标题追加 ✅/🟡 标记。F0–F3/A1–A4/E1 标记 ✅（代码已交付且 pytest 覆盖），A5/E2 标记 🟡（A5 真数据未跑 / E2 Windows 任务计划未注册）。Phase 内的 `[ ]` 勾选从 v5 起再没同步，下一次升级到 v6 时清理；在那之前以新增的顶部状态表为准。 |
+| 2026-04-22 | — | **B-ING-1.12 · orphan identifier 修复**: 宏观验收时发现 3 条 `person_identifiers` 的 `person_id` 在 `persons` 表里不存在（`amirnesta@gmail.com` / `h.oosterhuis119@outlook.com` / `astone.shi@gmail.com`）。根因是 `contacts_ingest_ios._apply` 在 strong-kind `register_identifier` 触发 auto-T2 merge 后没跟踪 survivor pid，后续 email 插入使用了已 absorbed 的 pid；`person_identifiers` 没有 FK 所以静默写入 orphan。修复：caller 跟踪 `r["person_id"]`，`ensure_person_with_seed` 同步加固，`register_identifier` docstring 写清 caller 契约；WhatsApp ingest 不需改（每 peer 只挂 1 个 identifier）。新增 `test_contacts_ingest_ios_orphan_regression.py` 2 用例复刻 bug 路径。生产 3 条 orphan 已 reparent 到 merge survivor（snapshot `20260422-090206-bing1.12-orphan-cleanup.duckdb`）。全量 **234/234** 绿。详见 `architecture/bing1-followups.md` B-ING-1.12 段。 |
 | 2026-04-22 | — | **B-ING-0 验收强化**（PC-3 字段 + 文档 + E1 健康检查，无新真数据路径）: `ingest_log.log_ingest_event` 现写 `started_at`（可 `started_at_utc=` 显式传，或从 `ts_utc`−`elapsed_ms` 自动推，满足 `real-ingest-scope.md` 对 Provenance 的字段表）。`real-ingest-scope.md` 的 PC-1/3/4 与 B-ING-0 代码对齐，删「只写文档」旧段。E1 `brain-weekly-maintenance.ps1` 加第 3 步只读 `ingest-log-recent --days 14 --limit 10`；`Invoke-BrainStep` 改 `python -m brain_cli.main` + `PYTHONPATH=…/src`（不再 `uv run`）。+1 pytest（显式 `started_at` 覆盖推导）。全量 **192 passed**。 |
 | 2026-04-21 | — | **F3 `merge-candidates sync-from-graph --auto-apply-min-score`**: 把图→T3 的"只写 pending、等人工 accept"半自动流程升级为"高置信自动合、低置信仍 pending"。`sync_from_graph` 新增 `auto_apply_min_score: float\|None`：`None`/≤0/>1/非数字均视为关闭（安全 fallback，不会误合）；`(0, 1]` 内的值把 proposed 分两桶，`score >= 阈值` 的先 `_insert_pending` 再立刻 `accept_candidate`（走完整 `merge_persons` + `merge_log` 审计链），低置信仍落 pending。`max_inserts` 预算优先喂给高置信桶。返回值新增 `auto_applied` / `would_auto_apply` / `would_stay_pending` / `auto_apply_min_score` / `auto_applied_samples`。CLI `brain merge-candidates sync-from-graph --apply --auto-apply-min-score 0.95` / MCP `merge_candidates_sync_from_graph_tool(auto_apply_min_score=…)` 全同步。E1 周任务加第 5 步可选自动合（`brain-weekly-maintenance.ps1 -AutoApplyMinScore`，默认 0 关闭；`register-brain-weekly-maintenance.ps1 -AutoApplyMinScore 0.95` 一键启用）。推荐 0.95 阈值 = 只自动合 `phone` 对（`email`/`wxid` 的 0.92/0.93 仍人工审）。12 新 pytest（dry-run 分桶预览 / apply 自动合 phone 留 email 在 pending / 无阈值仍全 pending / 预算优先高置信 / 阈值越界安全降级 / `_coerce_threshold` 7 参数化用例）+ 老测试的 merge_candidates 清理升级为 id 白名单（旧的 `DELETE FROM merge_candidates` 全表清会误删用户真实数据）。全量 **191 passed**。|
 | 2026-04-21 | — | **B6 对拍 · Pass 1/3 通过**: 首次 PS↔Python manifest 对拍。源 `D:\BaiduSyncdisk\20250922.手机照片`，839 文件，824 完全一致（98.2%），15 差异**全部是 Python 更准**（PNG 真 EXIF：Pillow 12.2 读到 iPhone 截图埋的 `DateTimeOriginal`，PS 的 `System.Drawing.Image` 对 PNG EXIF 支持有限只回退 mtime），0 Python 退化。过程中揪出两个真 bug 并修：（a）`asset_migrate_parity.load_manifest` 改用 `utf-8-sig` 吃掉 PS 5.1 `Export-Csv -Encoding UTF8` 的 BOM（没改前首列名变 `\ufeffsource_path` 造成 common_count=0 假阴性，+2 pytest 回归）；（b）`Pillow>=10.4.0` 加入 `tools/py/pyproject.toml`（没装时照片全 fallback mtime，造成 ~45% 假差异）。归档 `D:\second-brain-assets\_migration\parity-archive\parity-2026-04-21.*`。`asset-parity-runbook.md` 加 Pillow 前置。下一 pass ≥ 2026-04-28，换源目录。全量 **179 passed**。 |
