@@ -29,13 +29,13 @@ authoritative_at: C:\dev-projects\second-brain-hub\architecture\ROADMAP.md
 >
 > - **B-ING-3/B-ING-4 WhatsApp 真跑**：✅ 已完成。
 > - **B-ING-5 WeChat 真跑**：✅ 已完成（当前只 ingest 1 份 chat JSON，后续需扩大会话覆盖）。
-> - **B-ING-4 WeChat 真跑**：decoder 齐，但 Win11 商店版本地 DB 解密未上（runbook 推荐 iPhone 未加密备份路径）。
-> - **B-ING-5 Caps+D 文本 → person_notes**：已接通，但没被日常使用。
+> - **B-ING-5.1 Caps+D 文本 → person_notes**：✅ 冒烟已通过（`[people-note: Hammond]` 成功写入 `person_notes` 并 linked_person 命中）。
+> - **B-ING-6 图→T3 扫描**：🟡 当前受 Kuzu 文件并发锁影响，dry-run 可跑但 `proposed=0`，需单 writer 窗口复核一次。
 > - **A5 评估**：`brain who` / `brain overdue` / `brain context-for-meeting` 还没跑系统化 eval。虽然 WhatsApp + WeChat 已入库，但 Caps+D 未并线，overdue 覆盖面仍偏窄。
 >
 > **方向校正**：F0–A4 的工程底盘已经**过剩**（pytest 234、MCP 工具 15+、Kuzu + LanceDB + DuckDB 三 DB 全接通），短板在于 #1 文本 inbox / #3 写作助手 / #4 索引助手的**真用户使用证据**——代码齐，但没评估、没被日常用。下一阶段应优先：
 >
-> 1. 跑 B-ING-5.1（Caps+D→person_notes）+ B-ING-6（Kuzu 重建 + merge_candidates 扫描）→ 把 A5 从“数据已入库”推进到“可运营”。
+> 1. 收敛 B-ING-6 的 Kuzu 并发锁（确保单 writer）并完成一次 clean `sync-from-graph` 复核 → 把 A5 从“数据已入库”推进到“可运营”。
 > 2. 给 A5 也补一份评估集（`who/overdue/context-for-meeting`），把目前已完成的 A1/A2/A4 eval 基线扩展到 people 线。
 > 3. 补齐 E2 的 weekly-review / relationship-alerts / budget-tracker 定时任务（daily-digest 已上线）。
 >
@@ -539,6 +539,8 @@ Monica/Dex 式人际关系助手.
 | 2026-04-21 | — | **F3 `graph-rebuild-if-stale`**: 新增 `brain_agents/graph_build.graph_staleness` + `rebuild_if_stale`（对比 Kuzu vs DuckDB mtime；支持 `--max-age-hours` 墙钟阈值和 `--force`）；CLI `brain graph-rebuild-if-stale` + `brain graph-staleness`；E1 周任务改走这条便宜路径（fresh 时只 stat 文件；stale 才 ~7s 重建）；9 个新 pytest 覆盖 missing / no_duckdb / duckdb_newer / fresh / older_than_max / 不重建 fresh / 重建 stale / force / build 抛错时 skipped。全量 **78 passed**。 |
 | 2026-04-21 | — | **`tools/asset/` 迁移评估文档**: 产出 `architecture/asset-migration-plan.md`——清点 5 个 PS 脚本（migrate / source-cleanup / dedup / stats / overview-cards）、当前 Python 覆盖率（~0-60%）、6 批推荐顺序（B1 stats+dedup → B2 删 overview-cards → B3 migrate → B4 source-cleanup → B5 profile → B6 删 dir），含 "绝对不做的事" 和并跑对拍 3 周的中间态约定。**不动代码**，仅评估。 |
 | 2026-04-21 | — | **真实 ingest 上线范围文档**: 产出 `architecture/real-ingest-scope.md`——4 条线（iOS AddressBook / WhatsApp / WeChat / remark）代码就绪但全部未跑真数据，列出 4 个公共前置（PC-1 备份快照 / PC-2 T3 阈值演练 / PC-3 jsonl ingest 日志 / PC-4 事务包裹）、7 步上线路线（B-ING-0 ~ B-ING-6，~3 工日 / 跨 1 周）、绝对不做清单（不本地解密 / 不跨线混跑 / 不回溯 1 年前消息 / 用户不在不 apply）。**不动代码**，等用户说"开 B-ING-0"再起。 |
+| 2026-04-22 | — | **B-ING-5.1 · Caps+D→person_notes 冒烟通过**: 导入 `[people-note: Hammond]` 样本后，`text-inbox-ingest` 返回 `people_notes_written=1`、`linked_person=p_0ac7536db641`、`cloud_enqueued=false`，并在 `D:\second-brain-content\99-inbox\_draft\people-note-hammond.md` 落卡。DB 核对新增 `person_notes.source_kind='capsd-people-note'` 一行，`detail_json.tag_name=Hammond`。 |
+| 2026-04-22 | — | **B-ING-6 现场阻塞记录**: `merge-candidates sync-from-graph` 受 Kuzu 并发锁影响（`Could not set lock on ... brain.kuzu`）；清理残留 `graph-rebuild-if-stale` 进程后 dry-run 可执行但当前 `proposed=0`。需在单 writer 窗口完成一次 clean graph rebuild 再复核候选是否真实为 0。 |
 | 2026-04-22 | — | **B-ING-5 · WeChat 真跑收官**: `brain wechat-sync --dry-run` 命中 `contact.db`（6192 contacts）+ `chat_20292966501@chatroom.json`（would_insert=50），随后 `brain wechat-sync --since 2026-03-23T11:33:07` apply 成功：`persons_created=6192`、`identifiers_added=609`（`wechat_alias`）、`interactions_added=50`、`chats_processed=1`、`elapsed_ms=111333.9`。预先快照 `20260422-093307-bing5-wechat-pre-apply.duckdb`（sha `1c8d43da...`）；审计 `ingest-log-recent` 记录 `source=wechat mode=apply status=ok`。落库核对：`person_identifiers.kind=wxid` 6192、`kind=wechat_alias` 609、`interactions.source_kind=wechat` 50。 |
 | 2026-04-22 | — | **B-ING-3/B-ING-4 · WhatsApp 真跑收官**: `backup-ios-locate` 命中 `ChatStorage.sqlite`（`C:\Users\chase\Apple\MobileSync\Backup\00008101-0002250A21A3003A\7c\7c7fba66680ef796b916b067077cc246adacf01d`，2,039,808 bytes）；先 dry-run（`--limit 30`）抽样后 apply 全量：`rows_seen=1451` / `inserted=1451` / `persons_created=57` / `messages_without_peer=0` / `elapsed_ms=7280.3`。预先快照 `20260422-091535-bing3-whatsapp-pre-apply.duckdb`（sha `46b6c9c4...`），审计 `ingest-log-recent` 记录 `source=whatsapp_ios mode=apply status=ok` 且自动回填 `backup`。当前 `interactions.source_kind='whatsapp_ios'` 总量 1451。 |
 | 2026-04-22 | — | **A1/A2/A4 eval + E2 每日调度落地**: A1 现成 `tests/eval_ask.py`（10/10，Top-3 hit ratio=1.0）；新增 A2 `tests/eval_text_inbox.py` + `text_inbox_eval.yaml`（6/6，含 low-confidence 入 draft 与 PII block）；新增 A4 `tests/eval_write.py` + `write_eval.yaml`（3/3，template 路径下 `## 参考` / banned phrase / 段落上限全过）。E2 新增 `tools/housekeeping/brain-daily-digest.ps1` 与 `register-brain-daily-digest.ps1`，已注册 `BrainDailyDigest`（每天 07:00）并 `-RunNow` 冒烟通过；`D:\second-brain-content\08-indexes\digests\daily-2026-04-22.md` 已生成。全量 pytest 仍 **241/241** 绿。 |
