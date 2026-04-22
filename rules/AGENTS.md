@@ -479,6 +479,11 @@ Chase 每天 2+ 次通过 `CapsLock + D` 把剪贴板丢进 `99-inbox/`（文件
 #### 与 hub 结构化 CRM 的关系（2026-04-21）
 
 - **查询入口**：`brain who` / `brain overdue` / `brain context-for-meeting`（MCP 同源）读 DuckDB（`brain-telemetry.duckdb`）；不是只看 `06-people/` markdown。
+- **动态档案 (A6 S1, 2026-04-22)**：`brain facts add|list|invalidate` 写/查 bi-temporal `person_facts`（`--at` 时点查询，`--history` 展开历史）；`brain person-metrics recompute --all|--person-id` 从 `interactions` 重算派生指标（`last_seen` / `interactions_30d|90d` / `dormancy_days`）。`brain people-render --facts-history` 渲染含 Facts 历史的 Obsidian 卡。
+- **承诺追踪 (A6 S2, 2026-04-22)**：`brain thread add <pid> "<body>" --due 2026-04-30 --promised-by self|other` 记录一条未兑现承诺；`brain thread close <id> [--status done|dropped]` / `brain thread reopen <id>` / `brain thread update-due <id> --due …` / `brain thread list --person-id X --status open|all`；`brain due --within 7 [--overdue-only]` 看近期到期/超期清单（overdue 最先）；`brain threads-scan --since-days 14` **默认 dry-run**，用 Ollama fast model 从 `interactions` 抽候选承诺，加 `--apply` 才写入（`source_kind='llm_extracted'`，body_hash 每人去重所以重扫幂等）。渲染后 `brain people-render --person-id X` 人卡 `## Open threads` 自动出 6 列表格（⚠️ overdue / 🔥 today / ⏳ soon 芯片）；`generate_daily_digest()` 会加 `## Today's Commitments` 与 `## Overdue Commitments` 两节。
+- **滚动摘要 (A6 S3, 2026-04-22)**：`brain person-digest rebuild --person-id <pid>` 或 `--all [--min-interactions-30d 3] [--max-persons 50]` 跑 Ollama fast model 生成两类洞察：`topics_30d`（top-K 主题词 + 60–160 字中文小结，默认 30 天窗口）和 `weekly_digest`（默认 7 天一段自然语言）。幂等——每次 rebuild 写一条新行并把旧行的 `superseded_by` 指向新 id，历史可回溯；`brain person-digest show <pid>` 只看 current（`superseded_by IS NULL`）。写入后 `brain people-render --person-id <pid>` 人卡会自动出 `## Topics (30d)`（`tag` · `tag` · `tag` + 小结段 + `_window ending … · source: llm_`）与 `## Weekly Digest`（段落 + window 元数据）两节；无 current 数据则两节静默不出。`E2 BrainWeeklyReview`（每周日 20:00）会先 `person-metrics recompute --all` 再 `person-digest rebuild --all --weekly-days 7 --topics-days 30`，卡面自动保鲜。
+- **关系层级 + cadence 告警 (A6 S4, 2026-04-22)**：`brain tier set <pid> <inner|close|working|acquaintance|dormant> [--note …]` 写权威 tier（落到 `person_facts key='relationship_tier'`，bi-temporal 自动保留历史）；`brain tier get <pid>` 同时返回当前 tier 与最新 AI 建议；`brain tier list [--tier X] [--history]` 花名单；`brain tier suggest --person-id X` / `--all` 跑启发式（interactions_30d/90d + dormancy_days 分桶），默认只写到 `person_insights(insight_type='tier_suggestion')`，加 `--apply` 才在**无人工 fact 时**自动落 `person_facts`（**AI 永不覆盖人工**——唯一的硬规则）；`brain tier overdue [--tier inner|close|…]` 按 `config/thresholds.yaml → people_cadence` 的阈值（inner=14d / close=30d / working=60d / acquaintance=120d / dormant=null）查哪些人超期。人卡渲染：frontmatter 多 `relationship_tier` 和 `cadence_target_days`；正文多 `## Relationship Tier` 节（current / cadence target / status 三元组，status 出 ✅ within cadence 或 ⚠️ Nd overdue chip，下附 AI 建议行含 confidence + reason）。`generate_relationship_alerts` 多 `## Tiered Cadence Alarm` 节按 tier 分桶表格，原 flat ≥45d 段保留做基线（没配 tier 的人从此路径走）。`E2 BrainWeeklyReview` 末尾追加 `brain tier suggest --all`（不 --apply），周级自动刷新建议。
+- **Obsidian 可读视图（2026-04-22）**：`brain people-render --who "<名>"` 或 `--person-id …` 生成单张卡；`brain people-render --all --since-days 45 --limit 2000` 批量刷新 `06-people/by-person/*.md` + `_index.md`（**自动生成、下次运行覆盖正文**；持久笔记仍走 Caps+D 的 `[people-note: …]` → `person_notes`）。旧版 `wechat_to_people_bridge.py` 产物已迁至 `06-people/_legacy-wechat-bridge/`，勿与 DuckDB 真相源混淆。
 - **数据源**：微信 `brain wechat-sync`，iPhone 未加密备份 `brain backup-ios-locate` → `contacts-ingest-ios` / `whatsapp-ingest-ios`，Caps+D 文本走 `brain text-inbox-ingest`（归档后可写 `linked_person`、`person_notes`、`[people-note: …]`）。
 - **兜底队列**：本地模型吃不下的条目入 `brain cloud queue …`，人用 `brain cloud flush`（见 `architecture/ROADMAP.md` 附录）。
 - **Markdown**：`06-people/` 仍是叙事与指针卡；与 DuckDB **互补**，合并以标识符解析为准。
@@ -497,9 +502,12 @@ Chase 每天 2+ 次通过 `CapsLock + D` 把剪贴板丢进 `99-inbox/`（文件
 ```text
 06-people/
 ├── README.md                 ← 协议说明 + 字段规范
-├── _aliases.md               ← 同一人在不同 paste 里的名字映射（老王=王小明=@wang）
-├── _followups.md             ← 跨人待办汇总
-├── <person-slug>.md          ← 每人一份档案卡（Quick Facts / 他关心的事 / 我的承诺 / 最近动态）
+├── by-person/                ← `brain people-render` 自动刷新的只读关系卡（DuckDB 投影）
+│   ├── _index.md
+│   └── <可读名>__<person_id>.md
+├── _legacy-wechat-bridge/     ← 历史 one-off bridge 输出（wxid_/id-* 桩文件），已迁出主目录
+├── _aliases.md / _followups.md  ← 若仍存在：legacy；日常以 DuckDB + by-person 为准
+├── <person-slug>.md          ← (手工叙事期) 每人一份档案卡 — 与 by-person 自动卡可并存
 └── <person-slug>/            ← (可选) 该人的互动时间线 / 附件
     └── interactions.md
 ```

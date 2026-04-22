@@ -96,6 +96,10 @@ identity:
 #
 # Overriding at runtime: the weekly cron reads these; CLI callers may still
 # pass their own `--auto-apply-min-score` which wins for that invocation only.
+# Cloud queue: stale T3 merge rows → ``brain merge-candidates enqueue-stale-for-cloud``
+cloud_queue:
+  merge_t3_pending_days: 14
+
 merge_queue:
   graph_kind_scores:
     phone: 0.95
@@ -106,3 +110,28 @@ merge_queue:
     ios_contact_row: 0.8
   graph_default_score: 0.6
   auto_apply_min_score: 0.0
+
+# Phase A6 Sprint 4 · relationship tier cadence.
+# Each tier maps to a target "days since last contact" threshold. If
+# ``person_metrics.dormancy_days`` exceeds the target, the person shows up
+# in ``brain tier overdue`` + the BrainRelationshipAlerts digest section
+# for that tier. ``null`` disables the alarm (used for `dormant`, where by
+# definition we've accepted that we aren't staying in touch).
+#
+# Tier semantics (written to ``person_facts`` with
+# ``key='relationship_tier'``; human set > AI suggest):
+#   * inner        — core family, closest friends, co-founders
+#   * close        — regular friends, mentors, extended family
+#   * working      — active collaborators, colleagues
+#   * acquaintance — met once or twice; we track but don't nag
+#   * dormant      — explicit "don't remind me"
+#
+# Ground this against real usage before tuning: if an inner tier person
+# goes 10 days silent and you're fine, bump the threshold here rather
+# than muting alerts globally.
+people_cadence:
+  inner: 14
+  close: 30
+  working: 60
+  acquaintance: 120
+  dormant: null

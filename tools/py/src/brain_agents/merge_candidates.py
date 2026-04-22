@@ -10,6 +10,7 @@ identifiers that slipped past the ingest-time auto-merge.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from typing import Any
 
@@ -533,4 +534,76 @@ def _insert_and_accept(cand: dict[str, Any]) -> dict[str, Any]:
         "absorbed": accept_out.get("absorbed"),
         "accept_status": accept_out.get("status"),
         "accept_reason": accept_out.get("reason"),
+    }
+
+
+def enqueue_stale_merge_candidates_for_cloud(*, dry_run: bool = True) -> dict[str, Any]:
+    """Enqueue ``merge-t3-review`` for ``merge_candidates`` rows still ``pending`` and older than
+    ``cloud_queue.merge_t3_pending_days`` in ``thresholds.yaml`` (default 14). Skips candidate ids
+    already present in a pending ``cloud_queue`` row.
+    """
+    from brain_agents.cloud_queue import enqueue
+    from brain_core.config import load_thresholds_config
+
+    cfg = (load_thresholds_config() or {}).get("cloud_queue") or {}
+    days = int(cfg.get("merge_t3_pending_days") or 14)
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+
+    rows = query(
+        """
+        SELECT id, person_a, person_b, score, reason, created_at
+        FROM merge_candidates
+        WHERE lower(trim(status)) = 'pending' AND created_at < ?
+        ORDER BY id ASC
+        """,
+        [cutoff],
+    )
+    pending_rows = query(
+        """
+        SELECT payload_json FROM cloud_queue
+        WHERE status = 'pending' AND task_kind = 'merge-t3-review'
+        """
+    )
+    seen_mc: set[int] = set()
+    for pr in pending_rows:
+        try:
+            j = json.loads(pr["payload_json"])
+            mid = j.get("merge_candidate_id")
+            if mid is not None:
+                seen_mc.add(int(mid))
+        except Exception:
+            continue
+
+    enqueued = 0
+    skipped_dup = 0
+    sample: list[dict[str, Any]] = []
+    for r in rows:
+        mid = int(r["id"])
+        if mid in seen_mc:
+            skipped_dup += 1
+            continue
+        payload = {
+            "merge_candidate_id": mid,
+            "person_a": r["person_a"],
+            "person_b": r["person_b"],
+            "reason": str(r.get("reason") or ""),
+            "score": float(r["score"]) if r.get("score") is not None else None,
+        }
+        if dry_run:
+            enqueued += 1
+            if len(sample) < 15:
+                sample.append(payload)
+            continue
+        enqueue("merge-t3-review", payload)
+        enqueued += 1
+        seen_mc.add(mid)
+
+    return {
+        "status": "dry_run" if dry_run else "ok",
+        "days_threshold": days,
+        "cutoff_utc": cutoff.isoformat(),
+        "pending_candidates_found": len(rows),
+        "enqueued": enqueued,
+        "skipped_already_queued": skipped_dup,
+        "sample": sample,
     }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -113,11 +114,24 @@ def apply_people_postprocess(target_path: Path, raw_text: str) -> dict[str, Any]
 
     # --- LLM entity extraction → link single person when unambiguous
     extracted = {"phones": [], "emails": [], "wxids": [], "person_names": [], "urls": []}
-    if len(base_body.strip()) >= 40:
+    use_ollama_extract = os.getenv("BRAIN_EXTRACT_USE_OLLAMA", "0").strip() == "1"
+    if use_ollama_extract and len(base_body.strip()) >= 40:
         try:
             extracted = extract_entities(base_body)
-        except Exception:
-            pass
+            summary["entity_extract_mode"] = "ollama"
+        except Exception as exc:
+            summary["entity_extract_mode"] = "failed"
+            enqueue(
+                "capsd-note-hard",
+                {
+                    "reason": "entity-extract-failed",
+                    "path": str(target_path),
+                    "error": f"{exc.__class__.__name__}: {exc}",
+                },
+            )
+            summary["cloud_enqueued"] = True
+    else:
+        summary["entity_extract_mode"] = "disabled"
 
     resolved: set[str] = set()
     for phone in extracted.get("phones") or []:

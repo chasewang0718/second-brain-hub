@@ -186,10 +186,27 @@ def _ensure_v2_tables(conn: duckdb.DuckDBPyConnection) -> None:
             insight_type VARCHAR DEFAULT '',
             body TEXT,
             detail_json VARCHAR DEFAULT '{}',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            window_start_utc TIMESTAMP,
+            window_end_utc TIMESTAMP,
+            source_kind VARCHAR DEFAULT '',
+            superseded_by BIGINT
         )
         """
     )
+    # v5 · Phase A6 Sprint 3: add versioning columns (superseded_by chain +
+    # window markers) so a rebuild can preserve history the same way
+    # person_facts does. All existing rows get NULL defaults, which is
+    # backward compatible: a NULL `superseded_by` means "currently valid".
+    _pi_cols = _table_columns(conn, "person_insights")
+    for col, ddl in (
+        ("window_start_utc", "TIMESTAMP"),
+        ("window_end_utc", "TIMESTAMP"),
+        ("source_kind", "VARCHAR DEFAULT ''"),
+        ("superseded_by", "BIGINT"),
+    ):
+        if col not in _pi_cols:
+            conn.execute(f"ALTER TABLE person_insights ADD COLUMN {col} {ddl}")
 
     conn.execute("CREATE SEQUENCE IF NOT EXISTS open_threads_id_seq START 1")
     conn.execute(
@@ -200,10 +217,32 @@ def _ensure_v2_tables(conn: duckdb.DuckDBPyConnection) -> None:
             summary VARCHAR,
             status VARCHAR DEFAULT 'open',
             detail_json VARCHAR DEFAULT '{}',
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            due_utc TIMESTAMP,
+            promised_by VARCHAR,
+            last_mentioned_utc TIMESTAMP,
+            source_interaction_id BIGINT,
+            source_kind VARCHAR DEFAULT 'manual',
+            body_hash VARCHAR,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
+    # v4 · Phase A6 Sprint 2: backfill commitment columns on existing DBs
+    # (CREATE TABLE above only applies to fresh DBs; production DBs with v3
+    # schema must pick up the new columns via ALTER TABLE).
+    _ot_cols = _table_columns(conn, "open_threads")
+    for col, ddl in (
+        ("due_utc", "TIMESTAMP"),
+        ("promised_by", "VARCHAR"),
+        ("last_mentioned_utc", "TIMESTAMP"),
+        ("source_interaction_id", "BIGINT"),
+        ("source_kind", "VARCHAR DEFAULT 'manual'"),
+        ("body_hash", "VARCHAR"),
+        ("created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+    ):
+        if col not in _ot_cols:
+            conn.execute(f"ALTER TABLE open_threads ADD COLUMN {col} {ddl}")
 
     conn.execute("CREATE SEQUENCE IF NOT EXISTS relationship_edges_id_seq START 1")
     conn.execute(
@@ -280,6 +319,49 @@ def _ensure_v2_tables(conn: duckdb.DuckDBPyConnection) -> None:
     )
     conn.execute("CREATE SEQUENCE IF NOT EXISTS escalations_id_seq START 1")
 
+    # --- v3 · Phase A6 (Dynamic Person Profile) ---
+    # person_facts: bi-temporal key-value store. value_json is ALWAYS a JSON
+    # document (json.dumps-ed string/number/object/array). valid_to IS NULL
+    # means "currently valid"; writing a new fact for the same (person_id, key)
+    # must close the old row first (see brain_agents.person_facts.add_fact).
+    conn.execute("CREATE SEQUENCE IF NOT EXISTS person_facts_id_seq START 1")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS person_facts (
+            id BIGINT PRIMARY KEY DEFAULT nextval('person_facts_id_seq'),
+            person_id VARCHAR NOT NULL,
+            key VARCHAR NOT NULL,
+            value_json VARCHAR NOT NULL,
+            valid_from TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            valid_to TIMESTAMP,
+            confidence DOUBLE DEFAULT 1.0,
+            source_kind VARCHAR DEFAULT 'manual',
+            source_interaction_id BIGINT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    # person_metrics: overwrite-style derived table. ALL rows are recomputable
+    # from interactions via brain_agents.person_metrics.recompute_all(). Never
+    # treat this as source of truth — nuke + rebuild is always safe.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS person_metrics (
+            person_id VARCHAR PRIMARY KEY,
+            first_seen_utc TIMESTAMP,
+            last_seen_utc TIMESTAMP,
+            last_interaction_channel VARCHAR,
+            interactions_all BIGINT DEFAULT 0,
+            interactions_30d BIGINT DEFAULT 0,
+            interactions_90d BIGINT DEFAULT 0,
+            distinct_channels_30d INTEGER DEFAULT 0,
+            dormancy_days INTEGER,
+            computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
 
 def ensure_schema() -> None:
     conn = _connect()
@@ -290,6 +372,12 @@ def ensure_schema() -> None:
         ver = _migration_version(conn)
         if ver < 2:
             _record_migration(conn, 2)
+        if ver < 3:
+            _record_migration(conn, 3)
+        if ver < 4:
+            _record_migration(conn, 4)
+        if ver < 5:
+            _record_migration(conn, 5)
     finally:
         conn.close()
 

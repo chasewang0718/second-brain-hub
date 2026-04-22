@@ -68,8 +68,7 @@ mirror_at: D:\second-brain-content\01-concepts\workflow\brain-tools-index.md
 ```
 brain-tools/
 ├── ahk/
-│   ├── Chase202602.ahk             Chase 日常输入体系
-│   └── gsave-hotkey.ahk            CapsLock+D → inbox
+│   └── Chase202602.ahk             CapsLock+D → gsave（文本 + 剪贴板文件 → brain *-inbox-ingest）；gsave-hotkey 已并入本脚本
 ├── powershell/
 │   ├── Microsoft.PowerShell_profile.ps1
 │   ├── brain-weekly-report.ps1     周报生成脚本 (被 Task Scheduler 调用)

@@ -1,0 +1,134 @@
+version: 1
+description: "A5 fixed golden set (curated real contacts, stable over time)"
+cases:
+  - id: golden_who_alice_zhang
+    type: who
+    input:
+      name: "Alice Zhang"
+    expect:
+      min_results: 1
+  - id: golden_context_alice_zhang
+    type: context
+    input:
+      name: "Alice Zhang"
+      since_days: 3650
+      limit: 5
+    expect:
+      require_contact: true
+      require_keys:
+        - "contact"
+        - "recent_interactions"
+        - "graph_hints"
+      graph_hints_status_in:
+        - "ok"
+        - "skipped"
+
+  - id: golden_who_bob_van_dijk
+    type: who
+    input:
+      name: "Bob van Dijk"
+    expect:
+      min_results: 1
+  - id: golden_context_bob_van_dijk
+    type: context
+    input:
+      name: "Bob van Dijk"
+      since_days: 3650
+      limit: 5
+    expect:
+      require_contact: true
+      require_keys:
+        - "contact"
+        - "recent_interactions"
+        - "graph_hints"
+      graph_hints_status_in:
+        - "ok"
+        - "skipped"
+
+  - id: golden_who_zhiwei_cui
+    type: who
+    input:
+      name: "Zhiwei Cui"
+    expect:
+      min_results: 1
+  - id: golden_context_zhiwei_cui
+    type: context
+    input:
+      name: "Zhiwei Cui"
+      since_days: 3650
+      limit: 5
+    expect:
+      require_contact: true
+      require_keys:
+        - "contact"
+        - "recent_interactions"
+        - "graph_hints"
+      graph_hints_status_in:
+        - "ok"
+        - "skipped"
+
+  - id: golden_who_huluanhulai
+    type: who
+    input:
+      name: "胡乱胡来"
+    expect:
+      min_results: 1
+  - id: golden_context_huluanhulai
+    type: context
+    input:
+      name: "胡乱胡来"
+      since_days: 3650
+      limit: 5
+    expect:
+      require_contact: true
+      require_keys:
+        - "contact"
+        - "recent_interactions"
+        - "graph_hints"
+      graph_hints_status_in:
+        - "ok"
+        - "skipped"
+
+  - id: golden_who_quxincheng
+    type: who
+    input:
+      name: "屈歆程"
+    expect:
+      min_results: 1
+  - id: golden_context_quxincheng
+    type: context
+    input:
+      name: "屈歆程"
+      since_days: 3650
+      limit: 5
+    expect:
+      require_contact: true
+      require_keys:
+        - "contact"
+        - "recent_interactions"
+        - "graph_hints"
+      graph_hints_status_in:
+        - "ok"
+        - "skipped"
+
+  - id: golden_who_naznaruto
+    type: who
+    input:
+      name: "NazNaruto"
+    expect:
+      min_results: 1
+  - id: golden_context_naznaruto
+    type: context
+    input:
+      name: "NazNaruto"
+      since_days: 3650
+      limit: 5
+    expect:
+      require_contact: true
+      require_keys:
+        - "contact"
+        - "recent_interactions"
+        - "graph_hints"
+      graph_hints_status_in:
+        - "ok"
+        - "skipped"

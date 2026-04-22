@@ -82,11 +82,11 @@ def read_chat_json(path: Path) -> list[dict[str, Any]]:
     return [x for x in raw if isinstance(x, dict)]
 
 
-def candidate_chat_json_files(artifacts_dir: Path) -> list[Path]:
+def candidate_chat_json_files(artifacts_dir: Path, *, include_helper_chats: bool = False) -> list[Path]:
     out: list[Path] = []
     for f in sorted(artifacts_dir.glob("chat_*.json")):
         low = f.name.lower()
-        if "filehelper" in low or "file_transfer_assistant" in low:
+        if (not include_helper_chats) and ("filehelper" in low or "file_transfer_assistant" in low):
             continue
         out.append(f)
     return out

@@ -16,7 +16,12 @@ def _client() -> Client:
 
 
 def _default_model() -> str:
-    return os.getenv("BRAIN_ENTITY_MODEL", "qwen2.5:14b-instruct").strip()
+    legacy = os.getenv("BRAIN_ENTITY_MODEL", "").strip()
+    if legacy:
+        return legacy
+    from brain_core.ollama_models import brain_heavy_model
+
+    return brain_heavy_model()
 
 
 def _strip_json_fence(text: str) -> str:

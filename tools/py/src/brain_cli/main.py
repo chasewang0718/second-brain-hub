@@ -6,6 +6,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import typer
 from brain_core.config import load_paths_config, load_runtime_config
@@ -19,6 +20,21 @@ app.add_typer(cloud_app, name="cloud")
 
 merge_candidates_app = typer.Typer(help="T3 identity merge queue (manual review)")
 app.add_typer(merge_candidates_app, name="merge-candidates")
+
+facts_app = typer.Typer(help="Bi-temporal person facts (Phase A6)")
+app.add_typer(facts_app, name="facts")
+
+person_metrics_app = typer.Typer(help="Derived person_metrics (Phase A6)")
+app.add_typer(person_metrics_app, name="person-metrics")
+
+thread_app = typer.Typer(help="Open threads / commitments (Phase A6 Sprint 2)")
+app.add_typer(thread_app, name="thread")
+
+person_digest_app = typer.Typer(help="Rolling topics / weekly digest (Phase A6 Sprint 3)")
+app.add_typer(person_digest_app, name="person-digest")
+
+tier_app = typer.Typer(help="Relationship tier + cadence alarm (Phase A6 Sprint 4)")
+app.add_typer(tier_app, name="tier")
 
 
 def _ensure_utf8_stdout() -> None:
@@ -497,6 +513,79 @@ def context_for_meeting_cmd(
     typer.echo(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
 
 
+@app.command("people-render")
+def people_render_cmd(
+    who: str = typer.Option("", "--who", help="Primary name or alias (first match)"),
+    person_id: str = typer.Option("", "--person-id", help="Render exactly this person_id"),
+    all_people: bool = typer.Option(False, "--all", help="Render cards for many persons into 06-people/by-person/"),
+    since_days: int = typer.Option(
+        90,
+        "--since-days",
+        min=0,
+        max=3650,
+        help="With --all: only persons with an interaction on or after now-N days (0 = no time filter)",
+    ),
+    channel: str = typer.Option("", "--channel", "-c", help="With --all: optional channel filter (e.g. wechat, whatsapp)"),
+    limit: int = typer.Option(500, "--limit", min=1, max=20000, help="Max persons when using --all"),
+    interaction_limit: int = typer.Option(25, "--interaction-limit", min=1, max=200),
+    interaction_since_days: int = typer.Option(
+        0,
+        "--interaction-since-days",
+        min=0,
+        max=3650,
+        help="Limit interaction rows to this window (0 = use defaults: unlimited for --who/--person-id; match --since-days for --all)",
+    ),
+    graph_hints: bool = typer.Option(False, "--graph-hints", help="Include Kuzu shared-identifier section (single person only)"),
+    facts_history: bool = typer.Option(False, "--facts-history", help="Expand person_facts history table below current facts"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report only; do not write files"),
+) -> None:
+    from brain_agents.people_render import run_people_render
+
+    modes = sum([bool(who.strip()), bool(person_id.strip()), all_people])
+    if modes != 1:
+        typer.echo(
+            json.dumps(
+                {"status": "error", "reason": "specify exactly one of: --who, --person-id, --all"},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        raise typer.Exit(code=1)
+    isd = interaction_since_days if interaction_since_days > 0 else None
+    out = run_people_render(
+        who=who.strip() or None,
+        person_id=person_id.strip() or None,
+        all_people=all_people,
+        since_days=since_days,
+        channel=channel.strip() or None,
+        limit=limit,
+        interaction_limit=interaction_limit,
+        interaction_since_days=isd,
+        graph_hints=graph_hints,
+        facts_history=facts_history,
+        dry_run=dry_run,
+    )
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
+@app.command("people-insights-refresh")
+def people_insights_refresh_cmd(
+    person_id: str = typer.Option("", "--person-id", help="Refresh one specific person_id"),
+    name: str = typer.Option("", "--name", help="Refresh by name/alias (may match multiple people)"),
+    limit: int = typer.Option(50, "--limit", min=5, max=200, help="Recent interactions per person"),
+    since_days: int = typer.Option(90, "--since-days", min=1, max=3650, help="Only interactions within N days"),
+) -> None:
+    from brain_agents.people_insights import refresh_people_insights
+
+    out = refresh_people_insights(
+        person_id=person_id or None,
+        name=name or None,
+        limit=limit,
+        since_days=since_days,
+    )
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
 @merge_candidates_app.command("list")
 def merge_candidates_list_cmd(
     status: str = typer.Option("pending", "--status", help="pending | accepted | rejected | all"),
@@ -524,6 +613,424 @@ def merge_candidates_reject_cmd(candidate_id: int = typer.Argument(..., help="me
     from brain_agents.merge_candidates import reject_candidate
 
     typer.echo(json.dumps(reject_candidate(candidate_id), ensure_ascii=False, indent=2, default=str))
+
+
+@facts_app.command("add")
+def facts_add_cmd(
+    person_id: str = typer.Argument(..., help="Target person_id"),
+    key: str = typer.Argument(..., help="Fact key, e.g. residence / role / employer"),
+    value: str = typer.Argument("", help="String value (JSON-encoded on write). Omit when using --value-json."),
+    value_json: str = typer.Option("", "--value-json", help="Raw JSON payload (takes precedence over positional value)"),
+    confidence: float = typer.Option(1.0, "--confidence", min=0.0, max=1.0),
+    source_kind: str = typer.Option("manual", "--source-kind", help="manual | capsd | wechat | derived | ..."),
+    source_interaction_id: int = typer.Option(0, "--source-interaction-id", min=0),
+    valid_from: str = typer.Option(
+        "",
+        "--valid-from",
+        help="ISO datetime for valid_from (default = now UTC). Use to backfill history, e.g. '2024-01-15T00:00:00'",
+    ),
+    force: bool = typer.Option(False, "--force", help="Write even if the current fact is identical"),
+) -> None:
+    from datetime import datetime as _dt
+
+    from brain_agents.person_facts import add_fact
+
+    vj = value_json.strip() or None
+    val: Any = None if vj else value
+
+    vf_dt = None
+    if valid_from.strip():
+        try:
+            vf_dt = _dt.fromisoformat(valid_from.strip().replace("Z", "+00:00"))
+        except ValueError as exc:
+            typer.echo(json.dumps({"status": "error", "reason": f"bad --valid-from: {exc}"}, ensure_ascii=False, indent=2))
+            raise typer.Exit(code=1) from exc
+
+    out = add_fact(
+        person_id=person_id,
+        key=key,
+        value=val,
+        value_json=vj,
+        confidence=confidence,
+        source_kind=source_kind,
+        source_interaction_id=source_interaction_id or None,
+        valid_from=vf_dt,
+        force=force,
+    )
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
+@facts_app.command("list")
+def facts_list_cmd(
+    person_id: str = typer.Argument(..., help="Target person_id"),
+    at: str = typer.Option("", "--at", help="ISO UTC datetime for bi-temporal query (empty = currently valid)"),
+    history: bool = typer.Option(False, "--history", help="Return full history (overrides --at)"),
+    key: str = typer.Option("", "--key", help="Filter by fact key"),
+) -> None:
+    from datetime import datetime as _dt
+
+    from brain_agents.person_facts import list_facts
+
+    at_dt = None
+    if at.strip():
+        try:
+            at_dt = _dt.fromisoformat(at.strip().replace("Z", "+00:00"))
+        except ValueError as exc:
+            typer.echo(json.dumps({"status": "error", "reason": f"bad --at: {exc}"}, ensure_ascii=False, indent=2))
+            raise typer.Exit(code=1) from exc
+    rows = list_facts(
+        person_id,
+        at=at_dt,
+        include_history=history,
+        key=(key.strip() or None),
+    )
+    typer.echo(json.dumps(rows, ensure_ascii=False, indent=2, default=str))
+
+
+@facts_app.command("invalidate")
+def facts_invalidate_cmd(
+    fact_id: int = typer.Argument(..., help="person_facts.id to close"),
+    reason: str = typer.Option("", "--reason", help="Advisory note (not persisted)"),
+) -> None:
+    from brain_agents.person_facts import invalidate_fact
+
+    typer.echo(json.dumps(invalidate_fact(fact_id, reason=reason), ensure_ascii=False, indent=2, default=str))
+
+
+@person_metrics_app.command("recompute")
+def person_metrics_recompute_cmd(
+    person_id: str = typer.Option("", "--person-id", help="Recompute for a single person"),
+    all_flag: bool = typer.Option(False, "--all", help="Recompute for every person with interactions"),
+    no_remove_orphans: bool = typer.Option(
+        False,
+        "--no-remove-orphans",
+        help="(with --all) keep rows whose person_id no longer appears in interactions",
+    ),
+) -> None:
+    from brain_agents.person_metrics import recompute_all, recompute_one
+
+    pid = person_id.strip()
+    if all_flag and pid:
+        typer.echo(json.dumps({"status": "error", "reason": "use --all OR --person-id, not both"}, ensure_ascii=False, indent=2))
+        raise typer.Exit(code=1)
+    if not all_flag and not pid:
+        typer.echo(json.dumps({"status": "error", "reason": "specify --all or --person-id"}, ensure_ascii=False, indent=2))
+        raise typer.Exit(code=1)
+    if all_flag:
+        out = recompute_all(remove_orphans=not no_remove_orphans)
+    else:
+        out = recompute_one(pid)
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
+@person_metrics_app.command("show")
+def person_metrics_show_cmd(person_id: str = typer.Argument(..., help="Target person_id")) -> None:
+    from brain_agents.person_metrics import get_metrics
+
+    out = get_metrics(person_id)
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
+# --- Phase A6 Sprint 2 · open threads / commitments --------------------------
+
+
+@thread_app.command("add")
+def thread_add_cmd(
+    person_id: str = typer.Argument(..., help="Target person_id"),
+    body: str = typer.Argument(..., help="Commitment text (e.g. '下周三寄书')"),
+    due: str = typer.Option("", "--due", help="ISO datetime or date ('2026-05-01' = end of day UTC)"),
+    promised_by: str = typer.Option("", "--promised-by", help="self | other (who owes the action)"),
+    source_kind: str = typer.Option("manual", "--source-kind", help="manual | llm_extracted | wechat | ..."),
+    source_interaction_id: int = typer.Option(0, "--source-interaction-id", min=0),
+    force: bool = typer.Option(False, "--force", help="Bypass body_hash dedupe for LLM-sourced writes"),
+) -> None:
+    """Record a commitment ("open thread") for a person."""
+    from brain_agents.open_threads import add_thread
+
+    out = add_thread(
+        person_id=person_id,
+        body=body,
+        due_utc=(due.strip() or None),
+        promised_by=(promised_by.strip() or None),
+        source_kind=source_kind,
+        source_interaction_id=source_interaction_id or None,
+        force=force,
+    )
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
+@thread_app.command("close")
+def thread_close_cmd(
+    thread_id: int = typer.Argument(..., help="open_threads.id"),
+    status: str = typer.Option("done", "--status", help="done | dropped"),
+    reason: str = typer.Option("", "--reason", help="Advisory note (not persisted)"),
+) -> None:
+    from brain_agents.open_threads import close_thread
+
+    out = close_thread(thread_id, status=status, reason=reason)
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
+@thread_app.command("reopen")
+def thread_reopen_cmd(thread_id: int = typer.Argument(..., help="open_threads.id")) -> None:
+    from brain_agents.open_threads import reopen_thread
+
+    typer.echo(json.dumps(reopen_thread(thread_id), ensure_ascii=False, indent=2, default=str))
+
+
+@thread_app.command("update-due")
+def thread_update_due_cmd(
+    thread_id: int = typer.Argument(..., help="open_threads.id"),
+    due: str = typer.Option(
+        "",
+        "--due",
+        help="New ISO datetime/date, or '' to clear",
+    ),
+) -> None:
+    from brain_agents.open_threads import update_due
+
+    out = update_due(thread_id, due_utc=(due.strip() or None))
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
+@thread_app.command("list")
+def thread_list_cmd(
+    person_id: str = typer.Option("", "--person-id"),
+    status: str = typer.Option("open", "--status", help="open | done | dropped | all"),
+    limit: int = typer.Option(50, "--limit", min=1, max=1000),
+) -> None:
+    from brain_agents.open_threads import list_threads
+
+    s = status.strip().lower()
+    rows = list_threads(
+        person_id=(person_id.strip() or None),
+        status=None if s in {"all", ""} else s,
+        limit=limit,
+    )
+    typer.echo(json.dumps(rows, ensure_ascii=False, indent=2, default=str))
+
+
+@app.command("threads-scan")
+def threads_scan_cmd(
+    since_days: int = typer.Option(14, "--since-days", min=1, max=365),
+    person_id: str = typer.Option("", "--person-id", help="Scope to a single person"),
+    per_person_limit: int = typer.Option(30, "--per-person-limit", min=1, max=200),
+    max_persons: int = typer.Option(50, "--max-persons", min=1, max=5000),
+    min_confidence: float = typer.Option(0.6, "--min-confidence", min=0.0, max=1.0),
+    apply: bool = typer.Option(False, "--apply", help="Write accepted candidates (default: dry-run)"),
+) -> None:
+    """LLM-extract commitments from recent interactions (dry-run by default).
+
+    Candidates with ``confidence >= --min-confidence`` are written on
+    ``--apply``; duplicates (same person + body) are deduped via body_hash.
+    """
+    from brain_agents.commitment_extract import scan_commitments
+
+    out = scan_commitments(
+        since_days=since_days,
+        person_id=(person_id.strip() or None),
+        per_person_limit=per_person_limit,
+        max_persons=max_persons,
+        min_confidence=min_confidence,
+        apply=apply,
+    )
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
+@person_digest_app.command("rebuild")
+def person_digest_rebuild_cmd(
+    person_id: str = typer.Option("", "--person-id", help="Target a single person_id"),
+    all_people: bool = typer.Option(False, "--all", help="Scan all recently-active persons"),
+    insight_type: str = typer.Option(
+        "both",
+        "--insight-type",
+        help="both | topics | weekly",
+    ),
+    topics_days: int = typer.Option(30, "--topics-days", min=1, max=365),
+    weekly_days: int = typer.Option(7, "--weekly-days", min=1, max=60),
+    interaction_limit: int = typer.Option(40, "--interaction-limit", min=5, max=500),
+    max_persons: int = typer.Option(200, "--max-persons", min=1, max=5000),
+    min_interactions_30d: int = typer.Option(1, "--min-interactions-30d", min=1, max=1000),
+) -> None:
+    """Rebuild rolling topics + weekly digest insights.
+
+    Idempotent: each rebuild inserts a new row and points the previous row's
+    ``superseded_by`` at it. "Current" = ``superseded_by IS NULL``.
+    """
+    from brain_agents.person_digest import (
+        INSIGHT_TOPICS,
+        INSIGHT_WEEKLY,
+        rebuild_all,
+        rebuild_one,
+    )
+
+    t = insight_type.strip().lower()
+    if t == "both":
+        types = [INSIGHT_TOPICS, INSIGHT_WEEKLY]
+    elif t == "topics":
+        types = [INSIGHT_TOPICS]
+    elif t == "weekly":
+        types = [INSIGHT_WEEKLY]
+    else:
+        typer.echo(json.dumps({"status": "error", "reason": f"bad --insight-type: {insight_type!r}"}, indent=2))
+        raise typer.Exit(code=1)
+
+    if all_people:
+        out = rebuild_all(
+            insight_types=types,
+            topics_days=topics_days,
+            weekly_days=weekly_days,
+            interaction_limit=interaction_limit,
+            max_persons=max_persons,
+            min_interactions_30d=min_interactions_30d,
+        )
+    elif person_id.strip():
+        out = rebuild_one(
+            person_id.strip(),
+            insight_types=types,
+            topics_days=topics_days,
+            weekly_days=weekly_days,
+            interaction_limit=interaction_limit,
+        )
+    else:
+        typer.echo(json.dumps({"status": "error", "reason": "need --person-id or --all"}, indent=2))
+        raise typer.Exit(code=1)
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
+@person_digest_app.command("show")
+def person_digest_show_cmd(person_id: str = typer.Argument(..., help="Target person_id")) -> None:
+    from brain_agents.person_digest import get_current_insights
+
+    typer.echo(json.dumps(get_current_insights(person_id), ensure_ascii=False, indent=2, default=str))
+
+
+@tier_app.command("set")
+def tier_set_cmd(
+    person_id: str = typer.Argument(..., help="Target person_id"),
+    tier: str = typer.Argument(..., help="inner | close | working | acquaintance | dormant"),
+    note: str = typer.Option("", "--note", help="Optional human note (stored alongside)"),
+    source_kind: str = typer.Option("manual", "--source", help="source_kind on the fact row"),
+) -> None:
+    from brain_agents.relationship_tier import ALLOWED_TIERS, set_tier
+
+    try:
+        out = set_tier(person_id, tier, note=note, source_kind=source_kind)
+    except ValueError as exc:
+        typer.echo(
+            json.dumps(
+                {"status": "error", "reason": str(exc), "allowed": list(ALLOWED_TIERS)},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        raise typer.Exit(code=1)
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
+@tier_app.command("get")
+def tier_get_cmd(person_id: str = typer.Argument(..., help="Target person_id")) -> None:
+    from brain_agents.relationship_tier import get_tier, get_tier_suggestion
+
+    current = get_tier(person_id)
+    suggestion = get_tier_suggestion(person_id)
+    typer.echo(
+        json.dumps(
+            {"person_id": person_id, "current_tier": current, "suggestion": suggestion},
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+    )
+
+
+@tier_app.command("list")
+def tier_list_cmd(
+    tier: str = typer.Option("", "--tier", help="Filter by tier (optional)"),
+    include_history: bool = typer.Option(False, "--history", help="Include historical rows"),
+) -> None:
+    from brain_agents.relationship_tier import list_tiers
+
+    rows = list_tiers(tier=tier or None, include_history=include_history)
+    typer.echo(json.dumps({"count": len(rows), "rows": rows}, ensure_ascii=False, indent=2, default=str))
+
+
+@tier_app.command("suggest")
+def tier_suggest_cmd(
+    person_id: str = typer.Option("", "--person-id", help="Target a single person_id"),
+    all_people: bool = typer.Option(False, "--all", help="Scan all persons with metrics"),
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Write the suggestion to person_facts when NO human fact exists (never overwrites)",
+    ),
+    max_persons: int = typer.Option(2000, "--max-persons", min=1, max=20000),
+    min_interactions_all: int = typer.Option(1, "--min-interactions-all", min=0, max=10000),
+) -> None:
+    from brain_agents.relationship_tier import suggest_tier, suggest_tier_all
+
+    if all_people:
+        out = suggest_tier_all(
+            min_interactions_all=min_interactions_all,
+            max_persons=max_persons,
+            apply_as_fact=apply,
+        )
+    elif person_id.strip():
+        out = suggest_tier(person_id.strip(), apply_as_fact=apply)
+    else:
+        typer.echo(json.dumps({"status": "error", "reason": "need --person-id or --all"}, indent=2))
+        raise typer.Exit(code=1)
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
+@tier_app.command("overdue")
+def tier_overdue_cmd(
+    tier: str = typer.Option("", "--tier", help="Filter to one tier (optional)"),
+) -> None:
+    from brain_agents.relationship_tier import list_overdue_by_tier, load_cadence_config
+
+    tiers = [tier.strip().lower()] if tier.strip() else None
+    cadence = load_cadence_config()
+    out = list_overdue_by_tier(tiers=tiers, cadence=cadence)
+    total = sum(len(v) for v in out.values())
+    typer.echo(
+        json.dumps(
+            {
+                "cadence": cadence,
+                "total_overdue": total,
+                "by_tier": {k: len(v) for k, v in out.items()},
+                "rows": out,
+            },
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+    )
+
+
+@app.command("due")
+def due_cmd(
+    within: int = typer.Option(7, "--within", min=0, max=365, help="Days ahead to include"),
+    person_id: str = typer.Option("", "--person-id"),
+    overdue_only: bool = typer.Option(False, "--overdue-only", help="Only rows already past due"),
+    include_overdue: bool = typer.Option(True, "--include-overdue/--no-overdue"),
+    limit: int = typer.Option(100, "--limit", min=1, max=1000),
+) -> None:
+    """Show open commitments due within N days (includes overdue by default)."""
+    from datetime import timedelta as _td
+
+    from brain_agents.open_threads import _utc_now, list_due
+
+    rows = list_due(
+        within_days=0 if overdue_only else within,
+        include_overdue=True if overdue_only else include_overdue,
+        person_id=(person_id.strip() or None),
+        limit=limit,
+    )
+    if overdue_only:
+        now = _utc_now()
+        rows = [r for r in rows if r.get("due_utc") and r["due_utc"] < now - _td(seconds=0)]
+    typer.echo(json.dumps(rows, ensure_ascii=False, indent=2, default=str))
 
 
 @merge_candidates_app.command("enqueue-manual")
@@ -593,6 +1100,17 @@ def merge_candidates_sync_from_graph_cmd(
     typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
 
 
+@merge_candidates_app.command("enqueue-stale-for-cloud")
+def merge_candidates_enqueue_stale_for_cloud_cmd(
+    apply: bool = typer.Option(False, "--apply", help="Actually enqueue cloud_queue rows"),
+) -> None:
+    """Queue ``merge-t3-review`` tasks for pending merge_candidates older than ``cloud_queue.merge_t3_pending_days``."""
+    from brain_agents.merge_candidates import enqueue_stale_merge_candidates_for_cloud
+
+    out = enqueue_stale_merge_candidates_for_cloud(dry_run=not apply)
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
 @app.command("structure-history")
 def structure_history_cmd(dry_run: bool = typer.Option(True, help="Run dry-run only (recommended)")) -> None:
     from brain_agents.structure import structure_history
@@ -612,6 +1130,27 @@ def weekly_review_cmd() -> None:
     from brain_agents.digest import generate_weekly_review
 
     typer.echo(json.dumps(generate_weekly_review(), ensure_ascii=False, indent=2))
+
+
+@app.command("relationship-alerts")
+def relationship_alerts_cmd(days: int = typer.Option(45, min=1, max=365)) -> None:
+    from brain_agents.digest import generate_relationship_alerts
+
+    typer.echo(json.dumps(generate_relationship_alerts(days=days), ensure_ascii=False, indent=2))
+
+
+@app.command("budget-tracker")
+def budget_tracker_cmd() -> None:
+    from brain_agents.digest import generate_budget_tracker
+
+    typer.echo(json.dumps(generate_budget_tracker(), ensure_ascii=False, indent=2))
+
+
+@app.command("ollama-smoke")
+def ollama_smoke_cmd() -> None:
+    from brain_agents.ollama_smoke import run_smoke
+
+    typer.echo(json.dumps(run_smoke(), ensure_ascii=False, indent=2))
 
 
 @queue_app.command("list")
@@ -653,18 +1192,103 @@ def wechat_sync_cmd(
         "--since",
         help="Only import chat messages with ts >= this ISO-8601 timestamp",
     ),
+    include_helper_chats: bool = typer.Option(
+        False,
+        "--include-helper-chats",
+        help="Include chat_filehelper / chat_file_transfer_assistant exports",
+    ),
+    chat_whitelist: str = typer.Option(
+        "",
+        "--chat-whitelist",
+        help="Comma-separated conversations to ingest (e.g. filehelper,20292966501@chatroom)",
+    ),
+    chat_blacklist: str = typer.Option(
+        "",
+        "--chat-blacklist",
+        help="Comma-separated conversations to skip",
+    ),
+    helper_chat_mode: str = typer.Option(
+        "link-person",
+        "--helper-chat-mode",
+        help="link-person or no-person (helper chats only)",
+    ),
+    group_chats: str = typer.Option(
+        "bind_sender",
+        "--group-chats",
+        help="bind_sender (default)=import @chatroom lines under sender's person when wxid/alias resolves; skip=ignore group JSON files",
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Plan only; no DuckDB writes"),
 ) -> None:
     from brain_agents.wechat_sync import sync_from_cli
 
+    gc = group_chats.strip().lower()
+    if gc not in ("skip", "bind_sender"):
+        typer.echo(json.dumps({"status": "error", "reason": "group_chats must be skip or bind_sender"}, indent=2))
+        raise typer.Exit(code=1)
     typer.echo(
         json.dumps(
-            sync_from_cli(decoder_dir, contact_db=contact_db, since=since, dry_run=dry_run),
+            sync_from_cli(
+                decoder_dir,
+                contact_db=contact_db,
+                since=since,
+                include_helper_chats=include_helper_chats,
+                chat_whitelist=chat_whitelist,
+                chat_blacklist=chat_blacklist,
+                helper_chat_mode=helper_chat_mode,
+                group_chat_mode=gc,
+                dry_run=dry_run,
+            ),
             ensure_ascii=False,
             indent=2,
             default=str,
         )
     )
+
+
+@app.command("gmail-ingest-takeout")
+def gmail_ingest_takeout_cmd(
+    path: str = typer.Argument(..., help="Path to one .mbox file or a directory containing Takeout *.mbox exports"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Count only; no DuckDB writes"),
+    limit: int = typer.Option(0, "--limit", min=0, help="Max messages to ingest (0 = unlimited)"),
+    since: str = typer.Option("", "--since", help="Only messages with parsed Date >= this ISO-8601 instant"),
+) -> None:
+    from pathlib import Path
+
+    from brain_agents.gmail_takeout_ingest import ingest_takeout_mbox
+
+    root = Path(path).expanduser()
+    since_dt = None
+    if since.strip():
+        from datetime import datetime, timezone
+
+        s = since.strip()
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        since_dt = datetime.fromisoformat(s)
+        if since_dt.tzinfo is not None:
+            since_dt = since_dt.astimezone(timezone.utc).replace(tzinfo=None)
+    out = ingest_takeout_mbox(root, dry_run=dry_run, limit=limit, since=since_dt)
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+
+
+@app.command("wechat-prune-groups")
+def wechat_prune_groups_cmd(
+    apply: bool = typer.Option(False, "--apply", help="Execute deletes (default is dry-run only)"),
+    no_prune_contacts: bool = typer.Option(
+        False,
+        "--no-prune-contacts",
+        help="Keep persons that only exist as @chatroom handles (still delete group interactions)",
+    ),
+) -> None:
+    from brain_agents.wechat_sync import prune_wechat_group_artifacts
+
+    out = prune_wechat_group_artifacts(dry_run=not apply, prune_chatroom_contacts=not no_prune_contacts)
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+    if not apply:
+        itd = int(out.get("interactions_to_delete") or 0)
+        pdel = int(out.get("persons_to_delete") or 0)
+        if itd or pdel:
+            typer.echo("Re-run with --apply to execute.", err=True)
 
 
 @app.command("backup-ios-locate")

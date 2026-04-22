@@ -1,0 +1,128 @@
+version: 1
+description: "A5 people-engine baseline checks (who / overdue / context-for-meeting)"
+cases:
+  - id: who_hammond_exact
+    type: who
+    input:
+      name: "Hammond"
+    expect:
+      min_results: 1
+      require_keys:
+        - "id"
+        - "name"
+        - "last_seen_utc"
+      any_name_contains:
+        - "Hammond"
+
+  - id: who_hammond_lowercase
+    type: who
+    input:
+      name: "hammond"
+    expect:
+      min_results: 1
+      any_name_contains:
+        - "Hammond"
+
+  - id: who_ham_prefix
+    type: who
+    input:
+      name: "ham"
+    expect:
+      min_results: 1
+
+  - id: who_unknown_name_returns_empty
+    type: who
+    input:
+      name: "__NO_MATCH_A5_EVAL__"
+    expect:
+      max_results: 0
+
+  - id: overdue_wechat_30d_shape
+    type: overdue
+    input:
+      days: 30
+      channel: "wechat"
+    expect:
+      min_results: 1
+      require_keys:
+        - "days_since_channel_contact"
+
+  - id: overdue_global_30d_shape
+    type: overdue
+    input:
+      days: 30
+    expect:
+      min_results: 1
+      require_keys:
+        - "days_since_contact"
+
+  - id: overdue_channel_case_insensitive
+    type: overdue
+    input:
+      days: 30
+      channel: "WeChAt"
+    expect:
+      min_results: 1
+      require_keys:
+        - "days_since_channel_contact"
+
+  - id: overdue_short_window_allows_empty
+    type: overdue
+    input:
+      days: 1
+      channel: "meeting"
+    expect:
+      min_results: 0
+
+  - id: context_hammond_json_shape
+    type: context
+    input:
+      name: "Hammond"
+      since_days: 365
+      limit: 5
+    expect:
+      require_contact: true
+      require_keys:
+        - "contact"
+        - "recent_interactions"
+        - "graph_hints"
+      graph_hints_status_in:
+        - "ok"
+        - "skipped"
+
+  - id: context_hammond_json_since_7d
+    type: context
+    input:
+      name: "Hammond"
+      since_days: 7
+      limit: 3
+    expect:
+      require_contact: true
+      require_keys:
+        - "contact"
+        - "recent_interactions"
+        - "graph_hints"
+      graph_hints_status_in:
+        - "ok"
+        - "skipped"
+
+  - id: context_hammond_markdown
+    type: context_md
+    input:
+      name: "Hammond"
+      since_days: 365
+      limit: 5
+    expect:
+      contains_all:
+        - "Meeting context"
+        - "Recent interactions"
+
+  - id: context_unknown_name_markdown
+    type: context_md
+    input:
+      name: "__NO_MATCH_A5_EVAL__"
+      since_days: 365
+      limit: 5
+    expect:
+      contains_all:
+        - "(no matching contact)"

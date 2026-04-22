@@ -17,15 +17,17 @@ Design notes:
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 
-from brain_core.config import load_paths_config
 from brain_agents.file_inbox import _is_excluded  # reuse shared blacklist
+from brain_core.config import load_paths_config
 
 
 SUPPORTED_EXT = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
@@ -152,7 +154,66 @@ def _try_ocr(img_path: Path) -> tuple[str, str, str]:
     return ("ok" if lines else "pending"), excerpt, "" if lines else "empty_ocr"
 
 
-def _build_pointer_card(img_path: Path, ocr_status: str, excerpt: str) -> str:
+def _structure_ocr_with_llm(excerpt: str) -> tuple[str, str]:
+    """Heavy-model JSON extraction from OCR text. Returns (json_text, error_or_empty)."""
+    try:
+        from ollama import Client
+
+        from brain_core.ollama_models import brain_heavy_model
+    except Exception as exc:
+        return "", f"import:{exc}"
+
+    snippet = excerpt.strip()
+    if len(snippet) < 8:
+        return "", "excerpt_too_short"
+    host = os.getenv("OLLAMA_HOST", "").strip()
+    cli = Client(host=host) if host else Client()
+    model = brain_heavy_model()
+    prompt = (
+        "From the OCR text below, reply with ONE JSON object only (no markdown fence). Keys:\n"
+        '- "people": array of person names mentioned\n'
+        '- "event_time": ISO-8601 datetime string or empty string if unknown\n'
+        '- "event": short natural-language description of what happened\n'
+        '- "objects": short phrase for main physical/digital object(s)\n'
+        "Match the OCR language.\n\nOCR:\n"
+        f"{snippet[:6000]}"
+    )
+    try:
+        out = cli.generate(model=model, prompt=prompt)
+        if hasattr(out, "response"):
+            raw = str(getattr(out, "response") or "").strip()
+        elif isinstance(out, dict):
+            raw = str(out.get("response", "")).strip()
+        else:
+            raw = str(out).strip()
+        raw = re.sub(r"^```[a-zA-Z0-9]*\n?", "", raw).strip()
+        raw = re.sub(r"\n?```\s*$", "", raw).strip()
+        json.loads(raw)
+        return raw, ""
+    except Exception as exc:
+        return "", str(exc)
+
+
+def _enqueue_ocr_hard_queue(img_path: Path, *, ocr_status: str, reason: str) -> dict[str, Any] | None:
+    try:
+        from brain_agents.cloud_queue import enqueue
+
+        return enqueue(
+            "ocr-hard",
+            {"path": str(img_path), "ocr_status": ocr_status, "reason": reason[:2000]},
+        )
+    except Exception:
+        return None
+
+
+def _build_pointer_card(
+    img_path: Path,
+    ocr_status: str,
+    excerpt: str,
+    *,
+    structured_status: str = "",
+    structured_json: str = "",
+) -> str:
     stat = img_path.stat()
     body: list[str] = [
         "---",
@@ -162,6 +223,7 @@ def _build_pointer_card(img_path: Path, ocr_status: str, excerpt: str) -> str:
         f"asset_size: {_human_size(stat.st_size)}",
         f"asset_sha256: {_sha256_prefix(img_path)}",
         f"ocr_status: {ocr_status}",
+        f"structured_status: {structured_status or 'skipped'}",
         "source_original_path: unknown",
         f"created: {datetime.now(UTC).date().isoformat()}",
         "tags: [asset, image, pointer-card, auto-ingest]",
@@ -178,6 +240,17 @@ def _build_pointer_card(img_path: Path, ocr_status: str, excerpt: str) -> str:
         body.append("```")
     else:
         body.append("- [TODO] OCR 尚未产生文本 (paddleocr 未安装或空结果)。")
+    if structured_json.strip():
+        body.extend(
+            [
+                "",
+                "## LLM 结构化 (heavy)",
+                "",
+                "```json",
+                structured_json.strip(),
+                "```",
+            ]
+        )
     body.extend([
         "",
         "## 关键词",
@@ -231,15 +304,38 @@ def ingest_image(img_path: Path) -> dict[str, Any]:
                 str(img_path), "", "skipped", "pending", f"blacklist:{pattern}"
             ).to_dict()
         ocr_status, excerpt, ocr_reason = _try_ocr(img_path)
+        structured_status = ""
+        structured_json = ""
+        if (
+            ocr_status == "ok"
+            and excerpt.strip()
+            and os.getenv("BRAIN_IMAGE_STRUCTURE", "0").strip() == "1"
+        ):
+            structured_json, serr = _structure_ocr_with_llm(excerpt)
+            structured_status = "ok" if structured_json.strip() else f"error:{serr}"
         pointer = _pointer_card_path(img_path)
-        pointer.write_text(_build_pointer_card(img_path, ocr_status, excerpt), encoding="utf-8")
+        pointer.write_text(
+            _build_pointer_card(
+                img_path,
+                ocr_status,
+                excerpt,
+                structured_status=structured_status,
+                structured_json=structured_json,
+            ),
+            encoding="utf-8",
+        )
         task_path = ""
         if ocr_status != "ok":
             task_path = str(_write_cursor_queue_task(img_path, ocr_reason or ocr_status))
+        cq = None
+        if ocr_status in ("pending", "error"):
+            cq = _enqueue_ocr_hard_queue(img_path, ocr_status=ocr_status, reason=ocr_reason or ocr_status)
         result = ImageIngestResult(str(img_path), str(pointer), "ok", ocr_status, ocr_reason)
         out = result.to_dict()
         if task_path:
             out["cursor_queue_task"] = task_path
+        if cq:
+            out["cloud_queue"] = cq
         return out
     except Exception as exc:
         task_path = _write_cursor_queue_task(img_path, str(exc))

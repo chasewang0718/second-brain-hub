@@ -138,6 +138,26 @@ function Invoke-BrainCapsDDispatch {
         foreach ($p in $paths) {
             $results.Add([PSCustomObject]@{Path=$p; Subcommand=$sub; ExitCode=$exit; Raw=$raw})
         }
+        if ($exit -eq 0 -and -not $WhatIf) {
+            $tmp = [System.IO.Path]::GetTempFileName()
+            try {
+                $detailObj = @{ subcommand = $sub; paths = @($paths | ForEach-Object { $_.ToString() }) }
+                $detailJson = $detailObj | ConvertTo-Json -Compress -Depth 6
+                [System.IO.File]::WriteAllText($tmp, $detailJson, [System.Text.UTF8Encoding]::new($false))
+                $targs = @(
+                    '-m', 'uv', 'run', '--directory', $BrainRepo,
+                    'brain', 'telemetry-append',
+                    '--source', 'caps-d-dispatch',
+                    '--event', 'file-inbox-ingest',
+                    '--detail-file', $tmp
+                )
+                & python @targs 2>$null | Out-Null
+            } finally {
+                if (Test-Path -LiteralPath $tmp) {
+                    Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
     }
     foreach ($u in $unsupported) {
         $results.Add([PSCustomObject]@{Path=$u.Path; Subcommand=$null; ExitCode=-1; Raw=$u.Reason})

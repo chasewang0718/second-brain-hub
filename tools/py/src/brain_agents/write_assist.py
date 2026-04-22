@@ -138,7 +138,13 @@ def _llm_generate(
     banned: list[str],
     extra_instruction: str = "",
 ) -> str:
-    model = os.getenv("BRAIN_WRITE_MODEL", "qwen2.5:14b-instruct").strip()
+    legacy_wm = os.getenv("BRAIN_WRITE_MODEL", "").strip()
+    if legacy_wm:
+        model = legacy_wm
+    else:
+        from brain_core.ollama_models import brain_fast_model
+
+        model = brain_fast_model()
     bullets: list[str] = []
     for row in sources[: min(5, len(sources))]:
         prev = str(row.get("preview", ""))[:280]

@@ -19,9 +19,10 @@ authoritative_at: C:\dev-projects\second-brain-hub\architecture\ROADMAP.md
 > | A2 text-inbox | ✅ 已交付 | `brain_agents/text_inbox.py` + `brain text-inbox-ingest` + 实体抽取→`person_notes` |
 > | A3 file-inbox（含 PS 弃用） | ✅ 已交付 | `{file,image,audio}_inbox.py`；PS pipeline 2026-04-21 整体删除（见 12 条变更日志） |
 > | A4 write-assist | ✅ 已交付 | `brain_agents/write_assist.py` + provenance 脚注 + `brain write` |
-> | A5 people-engine | 🟡 代码齐 / 真数据多源已起量 | `people.py` + `who/overdue/context_for_meeting` CLI + MCP；B-ING-3 + B-ING-5 后已有 WhatsApp 1451 交互 + WeChat 6192 人/50 交互，仍待 Caps+D 高频使用与 A5 专项评估 |
+> | A5 people-engine | 🟡 代码齐 / 真数据已跑 / 评估进入“静态+金标+动态” | `people.py` + `who/overdue/context_for_meeting` CLI + MCP；B-ING-3 + B-ING-5 后已有 WhatsApp 1451 交互 + WeChat 6192 人/50 交互；A5 eval 当前 12 静态 + 12 固定金标 + 11 动态真实样本，共 35 case，35/35 通过 |
+> | A6 动态人物档案 | 🟡 规划中（2026-04-22） | bi-temporal `person_facts` + 派生 `person_metrics` + `open_threads` 到期化 + rolling topics；业内对标 Zep/Graphiti + Mem0 + Letta；4 sprint / 1.5–2 周末，详见 Phase A6 |
 > | E1 结构自优化 | ✅ 已交付 | `brain_agents/structure.py` + `tools/housekeeping/brain-weekly-maintenance.ps1`（每周日 23:00） |
-> | E2 主动化 | 🟡 骨架齐 / 日报已启 | `brain_agents/digest.py` + `brain daily-digest`；`BrainDailyDigest` 已注册（每天 07:00），weekly/alerts/budget 仍未调度化 |
+> | E2 主动化 | ✅ 调度全开 | `brain_agents/digest.py` + `daily-digest/weekly-review/relationship-alerts/budget-tracker`；`BrainDailyDigest` + `BrainWeeklyReview` + `BrainRelationshipAlerts` + `BrainBudgetTracker` 均已注册并 RunNow 冒烟通过 |
 >
 > **🟡 真数据缺口 · 最需要补的一块**
 >
@@ -31,15 +32,36 @@ authoritative_at: C:\dev-projects\second-brain-hub\architecture\ROADMAP.md
 > - **B-ING-5 WeChat 真跑**：✅ 已完成（当前只 ingest 1 份 chat JSON，后续需扩大会话覆盖）。
 > - **B-ING-5.1 Caps+D 文本 → person_notes**：✅ 冒烟已通过（`[people-note: Hammond]` 成功写入 `person_notes` 并 linked_person 命中）。
 > - **B-ING-6 图→T3 扫描**：✅ 已完成最后复核。在单 writer 会话清理残留图进程后，`sync-from-graph --dry-run` 与 `--apply` 均 `status=ok` 且 `proposed=0`（0-candidate no-op）。
-> - **A5 评估**：`brain who` / `brain overdue` / `brain context-for-meeting` 还没跑系统化 eval。虽然 WhatsApp + WeChat 已入库，但 Caps+D 未并线，overdue 覆盖面仍偏窄。
+> - **A5 评估**：✅ 已补首轮基线（`tools/py/tests/eval_people.py` + `tools/py/tests/people_eval.yaml`，当前 3/3 通过）；下一步是扩展真实样本覆盖与长期趋势追踪。
 >
 > **方向校正**：F0–A4 的工程底盘已经**过剩**（pytest 234、MCP 工具 15+、Kuzu + LanceDB + DuckDB 三 DB 全接通），短板在于 #1 文本 inbox / #3 写作助手 / #4 索引助手的**真用户使用证据**——代码齐，但没评估、没被日常用。下一阶段应优先：
 >
-> 1. 跑 A5 专项评估（`who/overdue/context-for-meeting`）并补真实业务样本 → 把 A5 从“数据已入库”推进到“可运营”。
-> 2. 给 A5 也补一份评估集（`who/overdue/context-for-meeting`），把目前已完成的 A1/A2/A4 eval 基线扩展到 people 线。
-> 3. 补齐 E2 的 weekly-review / relationship-alerts / budget-tracker 定时任务（daily-digest 已上线）。
+> 1. 扩容 A5 专项评估样本（真实联系人、同名异人、别名）并接入趋势追踪 → 把 A5 从“可跑”推进到“可运营”。
+> 2. 补齐 E2 的 weekly-review / relationship-alerts / budget-tracker 定时任务（daily-digest 已上线）。
 >
 > 下方每个 Phase 内的 `[ ]` 勾选**请忽略**；以本表 + 各 runbook 为准。待 B-ING-6 + A5 eval + E2 全调度交付后，统一把 ROADMAP 升级到 v6。
+
+## v6 退出标准（A5 / E2）
+
+以下标准用于判断是否从当前“持续优化中”升级为“v6 稳定运营态”：
+
+### A5 people-engine（必须同时满足）
+
+1. 连续 7 天每日评估全绿：`tools/py/tests/eval_people.py` 返回 `failed=0`。
+2. 评估趋势落盘连续 7 天：`08-indexes/digests/people-eval-history.jsonl` 每天新增 1 条快照，`people-eval-trend.md` 可正常刷新。
+3. 关系变化摘要连续 7 天生成：`08-indexes/digests/relationship-deltas-YYYY-MM-DD.md` 每天有新文件。
+4. WeChat 受控扩量至少 2 批完成且每批通过幂等复检：post-check 中 `wechat-sync --dry-run` 为 `would_insert=0`。
+
+### E2 主动化（必须同时满足）
+
+1. 三个日常任务需在任务计划中可见并为可运行状态：`BrainDailyDigest` / `BrainRelationshipAlerts` / `BrainBudgetTracker`；`BrainWeeklyReview` 改为按需开启（默认可保持禁用，不阻塞 v6 达标）。
+2. 连续 7 天运行无失败日志（含 `-RunNow` 冒烟与定时触发窗口）。
+3. 四类产物文件按频率持续生成（daily / weekly / relationship / budget）。
+
+### 判定与回退
+
+- **达标**：满足上述 A5 + E2 全部条件，ROADMAP 升级到 v6，并将 A5/E2 标记为“稳定运营态”。
+- **未达标**：继续执行“受控扩量 + 每日复检”循环，不升级版本；优先处理锁争用、会话噪音、任务失败三类问题。
 
 # second-brain-hub 优化路线图 (v5 · 零预算全自主)
 
@@ -390,6 +412,90 @@ Monica/Dex 式人际关系助手.
 
 ---
 
+### Phase A6 · 动态人物档案（Bi-temporal Person Profile）🟡 (1.5–2 周末, 4 sprint, 依赖 A5 + F3)
+
+把 `06-people` 从"堆积的聊天摘要"升级为"随时间演化的人物档案"：事实有 valid_from/valid_to 可回溯 + 指标每日重算 + 承诺可到期 + 主题滚动摘要。
+
+**业内对标**（2026-04 调研）：
+- Zep / Graphiti —— bi-temporal KG + 自动事实失效（`valid_time` × `transaction_time`）
+- Mem0 —— `pin / override / erase` 三态事实操作
+- Letta (MemGPT) —— core memory / archival / recall 三段式
+- Neo4j Agent Memory —— entity resolution（确定性 + 概率 + 人审）三档阈值
+
+**对齐原则**（相对现有 A5）：
+- **不重构**已有 `persons` / `person_identifiers` / `interactions` / `person_notes` / `person_insights` / `open_threads` / `merge_candidates`；A6 只**新增表**。
+- **不删 interactions**：它是 Episodic 真相源，永远可从它重算 metrics 和回填 facts。
+- **事实分三层**：pinned / derived / narrative（见 Sprint 1）。
+
+#### Sprint 1 · `person_facts`（bi-temporal）+ `person_metrics`（派生）· P0
+
+- [ ] DuckDB schema 升级到 v3：
+  - `person_facts(id, person_id, key, value, value_json, valid_from, valid_to, confidence, source_kind, source_interaction_id, created_at)` —— `valid_to IS NULL` 表示"当前事实"；写入同 `key` 新事实时自动把旧记录 `valid_to = now`
+  - `person_metrics(person_id PK, first_seen_utc, last_seen_utc, last_interaction_channel, interactions_all, interactions_30d, interactions_90d, distinct_channels_30d, dormancy_days, computed_at)` —— 覆盖式，派生自 `interactions`
+- [ ] `brain_agents/person_facts.py`：`add_fact` / `invalidate_fact` / `list_facts(person_id, at?, include_history=False)` / `get_fact(person_id, key, at?)`
+- [ ] `brain_agents/person_metrics.py`：`recompute_one(person_id)` / `recompute_all()`（全库重算一次约等于一次扫 `interactions`）
+- [ ] CLI：`brain facts add|invalidate|list`、`brain person-metrics recompute [--person-id|--all]`
+- [ ] `people_render` 在卡里增补两节：
+  - `## Facts`（当前事实 + 可选 `--facts-history` 展开历史）
+  - `## Metrics`（30d / 90d / all 计数、last_seen、dormancy、top channel）
+- [ ] pytest：bi-temporal 覆盖（新写入自动关闭旧事实 / 时点查询 / invalidate / confidence）+ metrics 正确性
+- [ ] 生产回填：一次性 `recompute_all`，对田果（`p_8168e6185835`）做回归验证
+
+**退出标志**：田果卡里出现 `Metrics`（互动 424 / last=2026-04-20 / dormancy=…）与 `Facts`（允许空）两节；`brain facts add p_8168e6185835 residence "杭州"` 可查、可覆盖、可 invalidate；pytest 全绿。
+
+#### Sprint 2 · `open_threads` 到期化 + 承诺抽取 · P1 ✅
+
+- [x] `open_threads` schema 补齐：`due_utc` / `status (open/done/dropped)` / `promised_by (self/other)` / `last_mentioned_utc` / `source_interaction_id` / `source_kind` / `body_hash` / `created_at`（schema v4，向后兼容 ALTER TABLE）
+- [x] `brain due [--within 7] [--person-id X] [--overdue-only]`、`brain thread add|close|reopen|update-due|list`
+- [x] 候选承诺抽取（手动优先，LLM 次之）：
+  - 手动：`brain thread add p_X "下周三寄书" --due 2026-04-30 --promised-by self`
+  - LLM 自动：新增 `brain threads-scan --since-days 14`，用 Ollama fast model（qwen2.5:14b-instruct）从最近 interactions 里抽候选；默认 `--dry-run`，确认后 `--apply` 写 `source_kind='llm_extracted'`；幂等（body_hash 去重）
+- [x] `people_render` 卡补 `## Open threads` 表格（status / due / who owes / body / last seen / source；⚠️ overdue / 🔥 today / ⏳ soon 芯片）
+- [x] E2 `BrainDailyDigest` 接入 "Today's Commitments" + "Overdue Commitments" 两节
+
+**退出标志**：✅ pytest +34 case (17 threads + 12 extract + 3 digest + 2 render)；✅ 生产烟测 snapshot `AC6D82DE..`, schema v4, 3 条 thread 写入, `brain due` 正确排序 (overdue-first), daily-2026-04-22.md 两节渲染, 田果卡 `## Open threads` 显示 ⏳ soon 芯片。详见 `architecture/a6-sprint2-acceptance.md`。
+
+#### Sprint 3 · Rolling Topics + Weekly Digest · P1→P2 ✅
+
+- [x] 每人 rolling topic 抽取：对 `interactions` 最近 30 / 90 天分桶，Ollama fast model 产出 top-K 主题词 + 一段小结，写入 `person_insights(insight_type='topics_30d'|'weekly_digest')`
+- [x] `brain person-digest rebuild [--person-id|--all] [--since-days 30]`；幂等、带 `superseded_by` 链
+- [x] `people_render` 卡补 `## Topics (30d)` + `## Weekly Digest`
+- [x] E2 `BrainWeeklyReview` 串联：先 `person-metrics recompute --all` → 再 `person-digest rebuild --all --since-days 7`
+- [x] pytest 覆盖：`superseded_by` 旧记录不出现在当前视图；空 interactions 人安全降级
+
+**退出标志**：任一 tier=inner 的人卡里都有不超过 7 天旧的 Topics 段落；`BrainWeeklyReview` `-RunNow` 一次后 `person_insights` 有该人 ≥ 1 条 `weekly_digest`。
+
+#### Sprint 4 · Relationship Tier + Cadence Alarm · P2 ✅
+
+- [x] 在 `person_facts` 里用 `key='relationship_tier'`（value ∈ `inner / close / working / acquaintance / dormant`）；人工置顶优先，AI 只做建议
+- [x] 每 tier 配 `cadence_target_days`（inner 14 / close 30 / working 60 / acquaintance 120 / dormant null）写 `config/thresholds.yaml` 的 `people_cadence:` 段
+- [x] `brain tier set <person_id> <tier>`、`brain tier get`、`brain tier list`、`brain tier suggest [--all|--person-id] [--apply]`、`brain tier overdue [--tier X]`（建议走 `person_insights.insight_type='tier_suggestion'` 带 superseded_by 链；`--apply` 仅在无人工 fact 时才写入）
+- [x] `people_render` 加 `relationship_tier` + `cadence_target_days` frontmatter 字段与 `## Relationship Tier` 节（within-cadence / overdue chip / AI 建议行）
+- [x] `digest.generate_relationship_alerts` 扩展 `## Tiered Cadence Alarm` 节按 tier 分桶（inner→14/close→30/working→60/acquaintance→120），无 tier 的人回落到原 45d 平基线
+- [x] E2 `BrainWeeklyReview` 追加 `brain tier suggest --all`（不 `--apply`，AI 永不覆盖人工设置）
+- [x] pytest 覆盖 22 case + `test_digest` 新增 3 case：set/get 循环、拒无效 tier、bi-temporal 历史、启发式分桶、cadence 阈值读取/garbage 容忍、superseded_by 链、人工不被 AI 覆盖、overdue 按天倒序 + 过滤、tiered alert 段落渲染
+
+**退出标志**：设 `relationship_tier=inner` 的人若 `dormancy_days > 14`，下一次 `brain relationship-alerts` 生成的 markdown 里 `## Tiered Cadence Alarm` 节的 `inner (cadence 14d)` 分桶列出该人；pytest 覆盖超期判定与阈值读取。
+
+**Done log**: 2026-04-22 — 接在 Sprint 3 后直接推进 S4，零新增表、零破坏性迁移。权威 tier 复用 `person_facts`（key='relationship_tier'），免费拿到"2026-Q1 她当时什么 tier"的 bi-temporal 回查能力；AI 建议复用 `person_insights(insight_type='tier_suggestion')`，同样走 `superseded_by` 链保留完整历史。CLI 新增 5 条子命令（set/get/list/suggest/overdue），`people_render` 在 Metrics 节后加一节 Relationship Tier（内含 `current`/`cadence target`/`status` 三元组，`status` 出 ✅ within cadence 或 ⚠️ Nd overdue chip），并在 frontmatter 暴露 `relationship_tier` + `cadence_target_days` 以便 Obsidian 查询/过滤。Alert 层 `generate_relationship_alerts` 新增 `## Tiered Cadence Alarm` 表格节（按 inner→close→working→acquaintance 优先级渲染，人名/dormancy/超期天数/last_seen），原 flat 45d 段保留做基线。生产烟测：47.5 MB pre-apply snapshot → `brain tier suggest --all`（500 人启发式分布 inner=10 / close=22 / working=311 / acquaintance=150 / dormant=7 — 符合直觉，长尾偏 working）→ 田果（dormancy=2d）人工 set inner，卡渲染出"✅ within cadence (2/14d)" + AI 建议 `inner` (conf 0.70)；demo 把陈浩祈（dormancy=103d）set 为 close，`brain tier overdue` 精确列出 `+73d`，`brain relationship-alerts` 输出的 md 里 `## Tiered Cadence Alarm → close (cadence 30d) → 1 overdue` 的表格行完全正确。测试总规模 105/105 通过（S1+S2+S3+S4 合计）。唯一性能观察：`tier suggest --all` 500 人跑 7.5 min（每人一个独立 `transaction()` 往返），后续若扩到 10k 人需批量化；当前规模可接受。
+
+#### 跨 Sprint 通用约束
+
+- 任何新表走 `_ensure_v2_tables` 同款迁移模式 + `_record_migration` 递增版本
+- 所有派生/抽取结果都必须能从 `interactions` + `person_facts` 重建，派生表**禁止**成为真相源
+- 每个事实/承诺/主题记录**必须**带 `source_interaction_id` 或 `source_kind='manual'/'capsd'`，为未来审计与 Graphiti 式 provenance 打基础
+- 每 Sprint 结束前跑一次 `brain ingest-backup-now --label a6-sprintN-pre-apply` 快照 DuckDB
+
+**整体退出标志**（A6 从 🟡 升 ✅）：
+- [x] 田果（或任一 tier=inner 人）卡同时可见：`Facts` / `Metrics` / `Open Threads` / `Topics (30d)` / `Weekly Digest` / `Relationship Tier` 六节（S4 新增 Relationship Tier 节）
+- [x] Bi-temporal 回查能回答："2026-Q1 她在忙什么"（`list_facts(at='2026-03-31')` 返回该时点有效事实集）；`relationship_tier` 同样享此能力
+- [x] A5 eval 不掉：`eval_people.py` 仍 ≥ 35/35
+- [ ] 连续 7 天 `BrainWeeklyReview` + `BrainRelationshipAlerts` 无失败（生产观测项，周级评估）
+
+> Phase A6 状态：**S1+S2+S3+S4 全部完成 ✅**（2026-04-22）。S5 起进入"运营 + 观测"阶段，关注 7 天连跑稳定性与 eval trend。
+
+---
+
 ### Phase E1 · 结构自优化 ✅ (2-3 周末, 依赖 A1+A2+F2)
 
 **自动执行**, git 兜底.
@@ -405,7 +511,7 @@ Monica/Dex 式人际关系助手.
 
 ---
 
-### Phase E2 · 主动化 🟡 (2 周末) · `digest.py` + daily 调度已上线；weekly/alerts/budget 待补
+### Phase E2 · 主动化 ✅ (2 周末) · 四类 digest 命令与调度均已上线
 
 每日/每周自动推送.
 
@@ -513,6 +619,9 @@ Monica/Dex 式人际关系助手.
 
 | 日期 | 版本 | 改动 |
 |---|---|---|
+| 2026-04-22 | — | **06-people 人类可读出口**：新增 `brain people-render`（`brain_agents/people_render.py`）从 DuckDB 生成 `06-people/by-person/*.md` 与 `_index.md`；`wechat-ingest-preset.ps1 -RunPostChecks` 串联 `--all --since-days 45 --limit 2000`。旧 `wechat_to_people_bridge.py` 产物迁至 `06-people/_legacy-wechat-bridge/`。pytest 新增 `test_people_render.py`。 |
+| 2026-04-22 | — | **Phase4 连续推进（批次 1 + 噪音复盘）**：使用 `wechat-ingest-preset.ps1 -Mode helper-no-person -ExtraWhitelist 20292966501@chatroom -Apply -RunPostChecks` 跑通完整证据链（preflight=0 / apply inserted=0 / post-check 全绿 / 关系变化摘要落盘）；随后对 `helper-link-person` 与 `helper-blacklist` 做 dry-run 复盘，二者均 `would_insert=0`，确认当前 decoder 导出下会话增量已耗尽，后续扩量需先刷新 decoder 产物。 |
+| 2026-04-22 | — | **Phase5 v6 gate（首轮）**：新增 A5/E2 的 v6 退出标准（连续 7 天评估/产物/调度健康）。首轮判定：**未达升级窗口**（观测天数不足 7 天），继续执行“受控扩量 + 每日复检”循环。 |
 | 2026-04-20 | v1 | 初版, 六 Phase 裁剪. 采纳 P1/2/3/5/6, 砍掉 agent 层 / fine-tune / 跨设备 |
 | 2026-04-20 | v2 | 加 Phase 7 写作助手 (7a/7b, 四层知识 + 7 行业技巧) + Phase 1.5 命名统一 |
 | 2026-04-20 | v3 | 加 Phase 2.5 任务派发器 (规则驱动, not-started) |
@@ -539,13 +648,30 @@ Monica/Dex 式人际关系助手.
 | 2026-04-21 | — | **F3 `graph-rebuild-if-stale`**: 新增 `brain_agents/graph_build.graph_staleness` + `rebuild_if_stale`（对比 Kuzu vs DuckDB mtime；支持 `--max-age-hours` 墙钟阈值和 `--force`）；CLI `brain graph-rebuild-if-stale` + `brain graph-staleness`；E1 周任务改走这条便宜路径（fresh 时只 stat 文件；stale 才 ~7s 重建）；9 个新 pytest 覆盖 missing / no_duckdb / duckdb_newer / fresh / older_than_max / 不重建 fresh / 重建 stale / force / build 抛错时 skipped。全量 **78 passed**。 |
 | 2026-04-21 | — | **`tools/asset/` 迁移评估文档**: 产出 `architecture/asset-migration-plan.md`——清点 5 个 PS 脚本（migrate / source-cleanup / dedup / stats / overview-cards）、当前 Python 覆盖率（~0-60%）、6 批推荐顺序（B1 stats+dedup → B2 删 overview-cards → B3 migrate → B4 source-cleanup → B5 profile → B6 删 dir），含 "绝对不做的事" 和并跑对拍 3 周的中间态约定。**不动代码**，仅评估。 |
 | 2026-04-21 | — | **真实 ingest 上线范围文档**: 产出 `architecture/real-ingest-scope.md`——4 条线（iOS AddressBook / WhatsApp / WeChat / remark）代码就绪但全部未跑真数据，列出 4 个公共前置（PC-1 备份快照 / PC-2 T3 阈值演练 / PC-3 jsonl ingest 日志 / PC-4 事务包裹）、7 步上线路线（B-ING-0 ~ B-ING-6，~3 工日 / 跨 1 周）、绝对不做清单（不本地解密 / 不跨线混跑 / 不回溯 1 年前消息 / 用户不在不 apply）。**不动代码**，等用户说"开 B-ING-0"再起。 |
+| 2026-04-22 | — | **E2 剩余调度补齐**: 新增 CLI `brain relationship-alerts --days` 与 `brain budget-tracker`；新增 `tools/housekeeping/brain-e2-task.ps1` + `register-brain-e2-tasks.ps1`，注册 `BrainWeeklyReview`（Sun 20:00）、`BrainRelationshipAlerts`（Daily 08:30）、`BrainBudgetTracker`（Mon 08:45），`-RunNow` 三任务均返回 OK。 |
 | 2026-04-22 | — | **B-ING-5.1 · Caps+D→person_notes 冒烟通过**: 导入 `[people-note: Hammond]` 样本后，`text-inbox-ingest` 返回 `people_notes_written=1`、`linked_person=p_0ac7536db641`、`cloud_enqueued=false`，并在 `D:\second-brain-content\99-inbox\_draft\people-note-hammond.md` 落卡。DB 核对新增 `person_notes.source_kind='capsd-people-note'` 一行，`detail_json.tag_name=Hammond`。 |
+| 2026-04-22 | — | **A5 专项评估扩展（第二轮）**: `people_eval.yaml` 从 3 case 扩展到 12 case，新增 who 前缀/不命中、overdue 渠道大小写容错、`context-for-meeting --format md`（命中/未命中）断言；`eval_people.py` 补 `context_md` 校验器。真实库复跑 `python tools/py/tests/eval_people.py` 为 `12/12 passed`，报告更新至 `architecture/a5-eval-baseline-2026-04-22.md`。 |
+| 2026-04-22 | — | **A5 趋势化接入 E2 weekly-review**: 新增 `tools/py/scripts/eval_people_trend.py`，每次执行写入 `D:\second-brain-content\08-indexes\digests\people-eval-history.jsonl`；`brain-e2-task.ps1` 在 `weekly-review` 后自动追加一次 A5 eval 快照（失败会让任务失败），已本机冒烟通过。 |
+| 2026-04-22 | — | **A5 趋势摘要 Markdown**: 新增 `tools/py/scripts/eval_people_trend_summary.py`，从 `people-eval-history.jsonl` 生成 `D:\second-brain-content\08-indexes\digests\people-eval-trend.md`；E2 `weekly-review` 已串联该步骤，周任务可直接消费可读趋势摘要。 |
+| 2026-04-22 | — | **A5 真实样本增强（静态+动态）**: `eval_people.py` 新增动态样本生成器（每次自动抽取最近联系人 6 条、高互动联系人 3 条、同名冲突 2 条），与静态 `people_eval.yaml` 组合运行；当前实跑 `23/23 passed`（`dynamic_cases_added=11`）。 |
+| 2026-04-22 | — | **A5 固定金标机制 v1**: `eval_people.py` 接入可选 `people_eval_golden.yaml`；新增 `tools/py/scripts/generate_people_golden_candidates.py` 用于从真实库筛出可读联系人候选；当前纳入 12 条固定金标并实跑 `35/35 passed`（`static=12, golden=12, dynamic=11`）。 |
+| 2026-04-22 | — | **A5 graph 正例夹具（可选）**: `eval_people.py` 新增 `graph_shared_identifier` 断言类型与共享标识符夹具；通过 `EVAL_PEOPLE_INCLUDE_GRAPH_POSITIVE=1` 显式启用（默认关闭），用于在 Kuzu 锁稳定窗口内验证 graph_hints 正例，不影响日常稳定基线。 |
 | 2026-04-22 | — | **B-ING-6 ✅ 收官（0-candidate no-op）**: 最后一轮在单 writer 会话先清理残留 `graph-rebuild-if-stale/graph-build` 进程后复跑；`merge-candidates sync-from-graph --dry-run` 返回 `status=ok, proposed=0`。随后按流程先 snapshot `20260422-101439-bing6-final-noop-apply.duckdb`（sha `201a7674...`）再执行 `--apply`，结果 `inserted=0, auto_applied=0`，确认当前图→T3 无新增候选。 |
 | 2026-04-22 | — | **B-ING-5 · WeChat 真跑收官**: `brain wechat-sync --dry-run` 命中 `contact.db`（6192 contacts）+ `chat_20292966501@chatroom.json`（would_insert=50），随后 `brain wechat-sync --since 2026-03-23T11:33:07` apply 成功：`persons_created=6192`、`identifiers_added=609`（`wechat_alias`）、`interactions_added=50`、`chats_processed=1`、`elapsed_ms=111333.9`。预先快照 `20260422-093307-bing5-wechat-pre-apply.duckdb`（sha `1c8d43da...`）；审计 `ingest-log-recent` 记录 `source=wechat mode=apply status=ok`。落库核对：`person_identifiers.kind=wxid` 6192、`kind=wechat_alias` 609、`interactions.source_kind=wechat` 50。 |
+| 2026-04-22 | — | **B-ING-5 扩容（helper chats）**: `wechat-sync` 新增 `--include-helper-chats` 开关（默认关闭）；开启后纳入 `chat_file_transfer_assistant.json` / `chat_filehelper.json`。dry-run 评估新增 100，快照 `20260422-112619-bing5-helper-chats.duckdb` 后 apply 实际 `inserted=50`（另 50 同 `source_id` 去重）；复跑 dry-run 三会话 `would_insert=0`。 |
+| 2026-04-22 | — | **B-ING-5 噪音控制阀**: `wechat-sync` 新增 `--chat-whitelist` / `--chat-blacklist`（会话级过滤）与 `--helper-chat-mode link-person|no-person`（helper 会话是否绑定 person）。可实现“保留 filehelper 记录但不挂到联系人”或“直接黑名单屏蔽 helper 噪音”。 |
+| 2026-04-22 | — | **B-ING-5 默认策略固化（runbook+preset）**: 新增 `tools/housekeeping/wechat-ingest-preset.ps1`（`default` / `helper-no-person` / `helper-link-person` / `helper-blacklist`，`-Apply` 自动先 snapshot），并新增 `architecture/wechat-ingest-policy-runbook.md` 快捷命令手册；`helper-no-person` dry-run 冒烟已通过。 |
+| 2026-04-22 | — | **B-ING-5 一键核对链路**: `wechat-ingest-preset.ps1` 新增 preflight 门槛（`-MaxWouldInsert`）与 `-RunPostChecks`（自动跑 `ingest-log-recent` + 幂等 dry-run + `eval_people.py` + 趋势刷新）。新增 `architecture/wechat-ingest-acceptance-checklist.md` 验收清单；`helper-no-person -RunPostChecks` 全链路通过。 |
+| 2026-04-22 | — | **B-ING-5 只读巡检定时化**: 新增 `tools/housekeeping/brain-wechat-inspect.ps1` 与 `register-brain-wechat-inspect.ps1`，将 `helper-no-person -RunPostChecks` 固化为每日只读巡检（默认 21:30）。`-RunNow` 冒烟通过，计划任务 `BrainWechatInspect` 状态 `Ready`。 |
 | 2026-04-22 | — | **B-ING-3/B-ING-4 · WhatsApp 真跑收官**: `backup-ios-locate` 命中 `ChatStorage.sqlite`（`C:\Users\chase\Apple\MobileSync\Backup\00008101-0002250A21A3003A\7c\7c7fba66680ef796b916b067077cc246adacf01d`，2,039,808 bytes）；先 dry-run（`--limit 30`）抽样后 apply 全量：`rows_seen=1451` / `inserted=1451` / `persons_created=57` / `messages_without_peer=0` / `elapsed_ms=7280.3`。预先快照 `20260422-091535-bing3-whatsapp-pre-apply.duckdb`（sha `46b6c9c4...`），审计 `ingest-log-recent` 记录 `source=whatsapp_ios mode=apply status=ok` 且自动回填 `backup`。当前 `interactions.source_kind='whatsapp_ios'` 总量 1451。 |
 | 2026-04-22 | — | **A1/A2/A4 eval + E2 每日调度落地**: A1 现成 `tests/eval_ask.py`（10/10，Top-3 hit ratio=1.0）；新增 A2 `tests/eval_text_inbox.py` + `text_inbox_eval.yaml`（6/6，含 low-confidence 入 draft 与 PII block）；新增 A4 `tests/eval_write.py` + `write_eval.yaml`（3/3，template 路径下 `## 参考` / banned phrase / 段落上限全过）。E2 新增 `tools/housekeeping/brain-daily-digest.ps1` 与 `register-brain-daily-digest.ps1`，已注册 `BrainDailyDigest`（每天 07:00）并 `-RunNow` 冒烟通过；`D:\second-brain-content\08-indexes\digests\daily-2026-04-22.md` 已生成。全量 pytest 仍 **241/241** 绿。 |
 | 2026-04-22 | — | **B-ING-2 · T3 阈值抽到 `config/thresholds.yaml`**: `merge_candidates._GRAPH_KIND_SCORES` / `_GRAPH_DEFAULT_SCORE` 原本硬编码，auto-apply 阈值只能从 CLI `--auto-apply-min-score` 传入。现在 `config/thresholds.yaml` 新增 `merge_queue:` 段（`graph_kind_scores` / `graph_default_score` / `auto_apply_min_score`），加一层 `@lru_cache` 的 `_load_merge_queue_config()` 懒加载，CLI 未显式传阈值时 fallback 到 YAML。默认 `auto_apply_min_score: 0.0`（= 禁用 auto-merge，与 B-ING-1 行为完全一致）；改成 0.95 即可让 E1 周任务自动合 phone 级高置信对，email/wxid 仍排队。Back-compat：`_GRAPH_KIND_SCORES` / `_GRAPH_DEFAULT_SCORE` 模块级别名保留。新增 `tests/test_merge_queue_config.py` 7 用例（YAML 读取 / 缺失 fallback / malformed / 越界 auto-apply / caller 覆盖 / None → YAML / back-compat 别名），全量 **241/241** 绿。 |
 | 2026-04-22 | — | **ROADMAP 对齐**: 顶部加"2026-04-22 状态快照"表 + 每 Phase 标题追加 ✅/🟡 标记。F0–F3/A1–A4/E1 标记 ✅（代码已交付且 pytest 覆盖），A5/E2 标记 🟡（A5 真数据未跑 / E2 Windows 任务计划未注册）。Phase 内的 `[ ]` 勾选从 v5 起再没同步，下一次升级到 v6 时清理；在那之前以新增的顶部状态表为准。 |
+| 2026-04-22 | — | **Phase A6 起稿 · 动态人物档案**: 受 2026-04 业内调研（Zep/Graphiti bi-temporal KG、Mem0 pin/override/erase、Letta 三段式、Neo4j entity resolution）启发，在 ROADMAP 新增 `Phase A6`（4 sprint / 1.5–2 周末），把 `06-people` 从聊天摘要升级为可回溯的动态档案：Sprint 1 `person_facts`（bi-temporal）+ `person_metrics`（派生）；Sprint 2 `open_threads` 到期化 + 承诺抽取；Sprint 3 rolling topics + weekly digest；Sprint 4 relationship tier + cadence alarm。对齐原则：不重构 A5 既有表、Episodic interactions 恒为真相源、所有派生必须可从 interactions + facts 重建。 |
+| 2026-04-22 | — | **Phase A6 Sprint 3 ✅ 交付**: DuckDB 升到 `_brain_migrations v5`，`person_insights` 补 `window_start_utc` / `window_end_utc` / `source_kind` / `superseded_by` 四列（ALTER TABLE 对 90 行历史 `topics`/`commitments`/`warmth` 旧行无破坏——旧行 `superseded_by IS NULL` 被当作 "current" 自然兼容）。新增 `brain_agents/person_digest.py` 两类 insight：`topics_30d`（top-K 主题词 + 60–160 字中文小结，严格 JSON prompt 走 Ollama fast model `qwen2.5:14b-instruct`）与 `weekly_digest`（7 天自然语言段落）；`rebuild_one` / `rebuild_all` 幂等——每次写一条新行并把旧行的 `superseded_by` 指向新 id，历史可回溯；LLM 崩盘、返回乱码、空窗口三类路径各自安全降级到启发式占位或直接跳过。CLI 新增 `brain person-digest rebuild [--person-id\|--all] [--insight-type both\|topics\|weekly] [--topics-days 30] [--weekly-days 7]` 与 `brain person-digest show <pid>`。`people_render` 的卡在 `## Open threads` 之后注入 `## Topics (30d)`（tag chips ` ` · ` ` + 小结段落 + window 元数据）和 `## Weekly Digest`（段落 + window 元数据），没有 current 行时两节都静默省略（避免空 header 污染）。E2 `brain-e2-task.ps1` 的 weekly-review 分支在 people-eval 趋势前**先**跑 `person-metrics recompute --all` 再跑 `person-digest rebuild --all --weekly-days 7 --topics-days 30`，子步骤失败只 `hub-alert` 不中断主流程。pytest +18 case（`test_person_digest.py` 15 · rebuild 双写 / 幂等 + superseded 链 / 空窗口跳过 / LLM 崩盘回退启发式 / LLM 乱码回退 / 30d 窗口过滤真的过滤 / fenced JSON 与散文夹带都能解析 / rebuild_all 扫活跃人 / 错误隔离；`test_people_render.py` 扩 3 case · Topics+Weekly 节渲染 / chips tag / 无 digest 数据静默省略），Sprint 1+2+3 全核心 **77/77** 绿。生产烟测：snapshot `brain-telemetry-pre-a6s3-20260422-220054.duckdb`（sha `2D92DE01...` / 47.01 MB），v5 迁移 0 错，田果（p_8168e6185835）首次 rebuild = topics_30d(`人民币` · `欧元` · `自拍杆`, "宝宝向妈妈求助换汇和带物品，提到机票和睡眠情况") + weekly_digest（"本周主要聊了一些生活琐事和旅行准备..."），`rebuild --all --min-interactions-30d 3 --max-persons 20` 扫 20 人全 ok / 0 错 / ~3 min，第二次 rebuild 验证 superseded 链 91→95、92→96 current 行数稳 2 条。验收报告 `architecture/a6-sprint3-acceptance.md`。承接 Sprint 2 的遗留问题：原来 LLM commitment-scan 在田果身上抽 0 条承诺（summary 太碎），Sprint 3 的 rolling digest 给了同一批 summary 一个更高层的 LLM 视角并产出非空叙述，说明"噪音在条目层噪、聚合层清"；未来 Sprint 4 的 tier 建议可直接基于 `weekly_digest` 做 warm signal。 |
+| 2026-04-22 | — | **Phase A6 Sprint 2 ✅ 交付**: DuckDB 升到 `_brain_migrations v4`，`open_threads` 补 `due_utc` / `promised_by (self/other)` / `last_mentioned_utc` / `source_interaction_id` / `source_kind` / `body_hash` / `created_at` 七列（ALTER TABLE 方式对 6192 行现存数据无破坏）。新增 `brain_agents/open_threads.py`（`add_thread / close_thread / reopen_thread / update_due / list_threads / list_due / classify_due`，body_hash 每人级去重让 LLM 重扫幂等）+ `brain_agents/commitment_extract.py`（Ollama fast model qwen2.5:14b，强 schema prompt → JSON 数组 → 每人独立解析，`_call_llm` 可注入以供测试，LLM 失败不崩盘）。CLI 新增 `brain thread add|close|reopen|update-due|list` + `brain due [--within N] [--overdue-only]` + `brain threads-scan [--since-days N] [--apply]`（默认 dry-run + 置信度过滤）。`people_render` 的 `## Open threads` 从单行摘要升级为 6 列表格（status chip ⚠️/🔥/⏳、due、who owes、body、last seen、source），空状态保留 `(none)`。`digest.generate_daily_digest` 新增 `## Today's Commitments` 与 `## Overdue Commitments` 两节，返回 JSON 加 `due_today_count` / `overdue_commitments_count`。pytest +34 case（test_open_threads 17 + test_commitment_extract 12 + test_digest 3 + test_people_render 2），核心 60/60 全绿。生产烟测：snapshot `20260422-214452-a6-sprint2-pre-apply.duckdb`（sha `AC6D82DE...`, 47.01 MB），migration v4 0 error，手动 3 条 thread（田果 4/29 soon / Jason 今日 due / Akane 已 overdue 2 天）写入，`brain due --within 10` 正确排序（overdue 最先），daily-2026-04-22.md 两节正确渲染，田果卡 `## Open threads` 显示 ⏳ soon 芯片。LLM dry-run 10 persons / 0 candidates（符合预期：当前 WeChat interactions summaries 多为 `[msg_type=50]` 元数据，Sprint 3 interaction summaries 落地后复扫会显著提升）。验收报告 `architecture/a6-sprint2-acceptance.md`。 |
+| 2026-04-22 | — | **Phase A6 Sprint 1 ✅ 交付**: DuckDB 升到 `_brain_migrations v3`，新增 `person_facts`（bi-temporal：`valid_from` / `valid_to` / `confidence` / `source_kind` / `source_interaction_id`；`value_json` 永远 JSON 编码，同 key 新写自动关闭旧记录）与 `person_metrics`（派生：`first_seen / last_seen / interactions_all|30d|90d / distinct_channels_30d / dormancy_days`，`recompute_all` 一次 CTE 扫 `interactions`）。新增 `brain_agents/person_facts.py` + `person_metrics.py`，CLI `brain facts add|list|invalidate` + `brain person-metrics recompute|show`，`people-render` 卡插入 `## Facts` + `## Metrics` 两节（空数据安全降级）+ `--facts-history` 展开历史。pytest +21 case（test_person_facts 11 + test_person_metrics 7 + test_people_render 3），全量 **273/273 passed**。生产回填：snapshot `20260422-184830-a6-sprint1-pre-apply.duckdb`（sha `e8137d68...` / 49 MB），`recompute --all` updated=656；田果（p_8168e6185835）Metrics = 互动 424 / 30d 147 / 90d 274 / last 2026-04-20 (wechat) / dormancy 2d。验收报告 `architecture/a6-sprint1-acceptance.md`。 |
+| 2026-04-22 | — | **WeChat decoder 全量导出上线**: `C:\dev-projects\wechat-decoder\scripts\wechat_chat_reader.py` 加 `--export-all` / `--limit 0`（抽出 `export_and_write_chat` helper 复用），一次导 54 个会话 / 6136 条原始消息；hub 侧 `brain wechat-sync --include-helper-chats` apply：`inserted=6036 / identifiers_added=609 / persons_created=0 / errors=0`，全库 WeChat interactions 从 101→6137、参与 persons 26→598，田果 (p_8168e6185835) 互动数 0→424。预同步快照 `20260422-181525-wechat-full-export.duckdb`。 |
 | 2026-04-22 | — | **B-ING-1.12 · orphan identifier 修复**: 宏观验收时发现 3 条 `person_identifiers` 的 `person_id` 在 `persons` 表里不存在（`amirnesta@gmail.com` / `h.oosterhuis119@outlook.com` / `astone.shi@gmail.com`）。根因是 `contacts_ingest_ios._apply` 在 strong-kind `register_identifier` 触发 auto-T2 merge 后没跟踪 survivor pid，后续 email 插入使用了已 absorbed 的 pid；`person_identifiers` 没有 FK 所以静默写入 orphan。修复：caller 跟踪 `r["person_id"]`，`ensure_person_with_seed` 同步加固，`register_identifier` docstring 写清 caller 契约；WhatsApp ingest 不需改（每 peer 只挂 1 个 identifier）。新增 `test_contacts_ingest_ios_orphan_regression.py` 2 用例复刻 bug 路径。生产 3 条 orphan 已 reparent 到 merge survivor（snapshot `20260422-090206-bing1.12-orphan-cleanup.duckdb`）。全量 **234/234** 绿。详见 `architecture/bing1-followups.md` B-ING-1.12 段。 |
 | 2026-04-22 | — | **B-ING-0 验收强化**（PC-3 字段 + 文档 + E1 健康检查，无新真数据路径）: `ingest_log.log_ingest_event` 现写 `started_at`（可 `started_at_utc=` 显式传，或从 `ts_utc`−`elapsed_ms` 自动推，满足 `real-ingest-scope.md` 对 Provenance 的字段表）。`real-ingest-scope.md` 的 PC-1/3/4 与 B-ING-0 代码对齐，删「只写文档」旧段。E1 `brain-weekly-maintenance.ps1` 加第 3 步只读 `ingest-log-recent --days 14 --limit 10`；`Invoke-BrainStep` 改 `python -m brain_cli.main` + `PYTHONPATH=…/src`（不再 `uv run`）。+1 pytest（显式 `started_at` 覆盖推导）。全量 **192 passed**。 |
 | 2026-04-21 | — | **F3 `merge-candidates sync-from-graph --auto-apply-min-score`**: 把图→T3 的"只写 pending、等人工 accept"半自动流程升级为"高置信自动合、低置信仍 pending"。`sync_from_graph` 新增 `auto_apply_min_score: float\|None`：`None`/≤0/>1/非数字均视为关闭（安全 fallback，不会误合）；`(0, 1]` 内的值把 proposed 分两桶，`score >= 阈值` 的先 `_insert_pending` 再立刻 `accept_candidate`（走完整 `merge_persons` + `merge_log` 审计链），低置信仍落 pending。`max_inserts` 预算优先喂给高置信桶。返回值新增 `auto_applied` / `would_auto_apply` / `would_stay_pending` / `auto_apply_min_score` / `auto_applied_samples`。CLI `brain merge-candidates sync-from-graph --apply --auto-apply-min-score 0.95` / MCP `merge_candidates_sync_from_graph_tool(auto_apply_min_score=…)` 全同步。E1 周任务加第 5 步可选自动合（`brain-weekly-maintenance.ps1 -AutoApplyMinScore`，默认 0 关闭；`register-brain-weekly-maintenance.ps1 -AutoApplyMinScore 0.95` 一键启用）。推荐 0.95 阈值 = 只自动合 `phone` 对（`email`/`wxid` 的 0.92/0.93 仍人工审）。12 新 pytest（dry-run 分桶预览 / apply 自动合 phone 留 email 在 pending / 无阈值仍全 pending / 预算优先高置信 / 阈值越界安全降级 / `_coerce_threshold` 7 参数化用例）+ 老测试的 merge_candidates 清理升级为 id 白名单（旧的 `DELETE FROM merge_candidates` 全表清会误删用户真实数据）。全量 **191 passed**。|

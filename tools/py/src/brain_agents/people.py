@@ -218,10 +218,70 @@ def context_for_meeting(
         if include_graph_hints
         else None
     )
+    insights_rows = query(
+        """
+        SELECT insight_type, body, detail_json, created_at
+        FROM person_insights
+        WHERE person_id = ?
+        ORDER BY created_at DESC
+        LIMIT 20
+        """,
+        [cid],
+    )
+    latest_by_type: dict[str, dict[str, Any]] = {}
+    for row in insights_rows:
+        it = str(row.get("insight_type") or "").strip().lower()
+        if it and it not in latest_by_type:
+            latest_by_type[it] = row
+    topics: list[str] = []
+    commitments: list[str] = []
+    warmth: int | None = None
+    trow = latest_by_type.get("topics")
+    if trow:
+        try:
+            d = json.loads(str(trow.get("detail_json") or "{}"))
+            if isinstance(d, dict):
+                topics = [str(x).strip() for x in (d.get("topics") or []) if str(x).strip()]
+        except Exception:
+            pass
+        if not topics:
+            body = str(trow.get("body") or "").strip()
+            topics = [x.strip() for x in body.split(",") if x.strip()]
+    crow = latest_by_type.get("commitments")
+    if crow:
+        try:
+            d = json.loads(str(crow.get("detail_json") or "{}"))
+            if isinstance(d, dict):
+                commitments = [str(x).strip() for x in (d.get("commitments") or []) if str(x).strip()]
+        except Exception:
+            pass
+        if not commitments:
+            body = str(crow.get("body") or "").strip()
+            commitments = [x.strip() for x in body.splitlines() if x.strip()]
+    wrow = latest_by_type.get("warmth")
+    if wrow:
+        try:
+            d = json.loads(str(wrow.get("detail_json") or "{}"))
+            if isinstance(d, dict):
+                warmth = int(d.get("warmth") or 0) or None
+        except Exception:
+            pass
+        if warmth is None:
+            try:
+                warmth = int(str(wrow.get("body") or "").strip())
+            except Exception:
+                warmth = None
+    insights = {
+        "topics": topics[:10],
+        "commitments": commitments[:10],
+        "warmth": warmth,
+        "available": bool(topics or commitments or warmth is not None),
+    }
     return {
         "contact": contact,
         "recent_interactions": interactions,
         "graph_hints": graph_hints,
+        "insights": insights,
     }
 
 
@@ -254,6 +314,23 @@ def context_for_meeting_markdown(payload: dict[str, Any]) -> str:
         ch = str(r.get("channel") or "")
         summary = str(r.get("summary") or "").replace("|", "\\|").replace("\n", " ")
         lines.append(f"| {ts} | {ch} | {summary} |")
+
+    ins = payload.get("insights") or {}
+    topics = [str(x).strip() for x in (ins.get("topics") or []) if str(x).strip()]
+    commitments = [str(x).strip() for x in (ins.get("commitments") or []) if str(x).strip()]
+    warmth = ins.get("warmth")
+    if topics or commitments or warmth is not None:
+        lines.append("")
+        lines.append("#### 近期洞察")
+        lines.append("")
+        if warmth is not None:
+            lines.append(f"- **关系温度(1-5)**: {warmth}")
+        if topics:
+            lines.append(f"- **最近话题**: {', '.join(topics)}")
+        if commitments:
+            lines.append("- **最近承诺**:")
+            for item in commitments:
+                lines.append(f"  - {item}")
 
     hints = payload.get("graph_hints") or {}
     shared = hints.get("shared_identifier") or [] if hints.get("status") == "ok" else []

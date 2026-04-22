@@ -68,9 +68,9 @@ if (-not $SkipStartupShortcuts) {
     Write-Host "`n[2/3] 创建启动目录快捷方式" -ForegroundColor Cyan
     $shell = New-Object -ComObject WScript.Shell
 
+    # Caps+D / gsave 已合并进 Chase202602.ahk；不再为废弃的 gsave-hotkey.ahk 建启动项
     $shortcuts = @(
-        @{ Name = "Chase202602.ahk"; Script = "Chase202602.ahk" },
-        @{ Name = "gsave-hotkey.ahk"; Script = "gsave-hotkey.ahk" }
+        @{ Name = "Chase202602.ahk"; Script = "Chase202602.ahk" }
     )
 
     foreach ($s in $shortcuts) {
