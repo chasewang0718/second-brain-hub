@@ -110,35 +110,125 @@ def query_manifest_files(
     return hits
 
 
-def find_chatstorage_sqlite(
-    backup_udid_dir: Path | None = None,
+def _hit_info(hit: ManifestHit) -> tuple[str, int]:
+    basename = Path(hit.relative_path).name if hit.relative_path else ""
+    size = 0
+    if hit.resolved_path and hit.resolved_path.is_file():
+        try:
+            size = hit.resolved_path.stat().st_size
+        except OSError:
+            size = 0
+    return basename, size
+
+
+def _select_best_hit(hits: list[ManifestHit], *, exact_basename: str) -> tuple[ManifestHit | None, str, list[dict[str, Any]]]:
+    """Rank Manifest hits and pick the real deal.
+
+    B-ING-1.4: the first ingest grabbed an empty 20KB ``AddressBook.sqlitedb``
+    that happened to be the first row returned by ``query_manifest_files``,
+    which put the runbook into a "why is my person count so low?" spiral.
+    This selector:
+
+    1. Keeps only hits whose physical file actually exists.
+    2. Strongly prefers hits whose basename exactly equals ``exact_basename``
+       (e.g. ``AddressBook.sqlitedb``) over siblings like
+       ``AddressBookImages.sqlitedb`` or ``AddressBook-v22.abcddb``.
+    3. Among those, picks the one with the **largest non-zero size**.
+    4. Falls back to "first resolved" only when every candidate is 0-byte.
+
+    Returns ``(best_hit, selected_reason, ranked_candidates_dicts)``.
+    """
+    resolved = [h for h in hits if h.resolved_path and h.resolved_path.is_file()]
+
+    enriched: list[tuple[ManifestHit, str, int, bool]] = []
+    for h in resolved:
+        base, size = _hit_info(h)
+        exact = base.lower() == exact_basename.lower()
+        enriched.append((h, base, size, exact))
+
+    candidates = [
+        {
+            "file_id": h.file_id,
+            "domain": h.domain,
+            "relative_path": h.relative_path,
+            "basename": base,
+            "resolved_path": str(h.resolved_path) if h.resolved_path else None,
+            "size": size,
+            "exact_basename_match": exact,
+        }
+        for (h, base, size, exact) in enriched
+    ]
+
+    if not enriched:
+        return None, "no_resolved_candidate", candidates
+
+    exact_pool = [t for t in enriched if t[3]]
+    pool = exact_pool if exact_pool else enriched
+
+    nonempty = [t for t in pool if t[2] > 0]
+    reason_prefix = "exact_basename" if exact_pool else "no_exact_basename_match"
+    if nonempty:
+        nonempty.sort(key=lambda t: t[2], reverse=True)
+        best_hit, _, best_size, _ = nonempty[0]
+        reason = f"{reason_prefix}+largest_size_{best_size}"
+        return best_hit, reason, candidates
+
+    pool.sort(key=lambda t: t[0].file_id)
+    best_hit = pool[0][0]
+    return best_hit, f"{reason_prefix}+all_empty_fallback", candidates
+
+
+def _find_backup_file(
     *,
-    roots: list[Path] | None = None,
+    backup_udid_dir: Path | None,
+    roots: list[Path] | None,
+    relative_path_substring: str,
+    exact_basename: str,
+    primary_domain_like: str | None,
 ) -> dict[str, Any]:
+    """Shared plumbing for address-book / chat-storage locators."""
     base = backup_udid_dir or latest_backup_dir(roots)
     if base is None:
         return {"status": "not_found", "reason": "no_backup_with_manifest"}
     mf = base / "Manifest.db"
     if not mf.is_file():
         return {"status": "not_found", "backup_dir": str(base), "reason": "missing_manifest_db"}
-    hits = query_manifest_files(mf, relative_path_substring="ChatStorage.sqlite", domain_like="whatsapp")
+
+    hits = query_manifest_files(mf, relative_path_substring=relative_path_substring, domain_like=primary_domain_like)
     if not hits:
-        hits = query_manifest_files(mf, relative_path_substring="ChatStorage.sqlite", domain_like=None)
-    best = next((h for h in hits if h.resolved_path and h.resolved_path.is_file()), None)
+        hits = query_manifest_files(mf, relative_path_substring=relative_path_substring, domain_like=None)
+
+    best, reason, candidates = _select_best_hit(hits, exact_basename=exact_basename)
+    selected_path = str(best.resolved_path) if best and best.resolved_path else None
+    _, selected_size = _hit_info(best) if best else ("", 0)
+
+    status = "ok" if selected_path else "unresolved"
     return {
-        "status": "ok" if best and best.resolved_path else "unresolved",
+        "status": status,
         "backup_dir": str(base),
         "hits": [
-            {
-                "file_id": h.file_id,
-                "domain": h.domain,
-                "relative_path": h.relative_path,
-                "resolved_path": str(h.resolved_path) if h.resolved_path else None,
-            }
-            for h in hits[:20]
+            {k: v for k, v in c.items() if k in ("file_id", "domain", "relative_path", "resolved_path")}
+            for c in candidates[:20]
         ],
-        "selected": str(best.resolved_path) if best and best.resolved_path else None,
+        "candidates": candidates[:20],
+        "selected": selected_path,
+        "selected_reason": reason,
+        "selected_size": selected_size if best else 0,
     }
+
+
+def find_chatstorage_sqlite(
+    backup_udid_dir: Path | None = None,
+    *,
+    roots: list[Path] | None = None,
+) -> dict[str, Any]:
+    return _find_backup_file(
+        backup_udid_dir=backup_udid_dir,
+        roots=roots,
+        relative_path_substring="ChatStorage.sqlite",
+        exact_basename="ChatStorage.sqlite",
+        primary_domain_like="whatsapp",
+    )
 
 
 def find_addressbook_sqlitedb(
@@ -146,30 +236,13 @@ def find_addressbook_sqlitedb(
     *,
     roots: list[Path] | None = None,
 ) -> dict[str, Any]:
-    base = backup_udid_dir or latest_backup_dir(roots)
-    if base is None:
-        return {"status": "not_found", "reason": "no_backup_with_manifest"}
-    mf = base / "Manifest.db"
-    if not mf.is_file():
-        return {"status": "not_found", "backup_dir": str(base), "reason": "missing_manifest_db"}
-    hits = query_manifest_files(mf, relative_path_substring="AddressBook.sqlitedb", domain_like="HomeDomain")
-    if not hits:
-        hits = query_manifest_files(mf, relative_path_substring="AddressBook.sqlitedb", domain_like=None)
-    best = next((h for h in hits if h.resolved_path and h.resolved_path.is_file()), None)
-    return {
-        "status": "ok" if best and best.resolved_path else "unresolved",
-        "backup_dir": str(base),
-        "hits": [
-            {
-                "file_id": h.file_id,
-                "domain": h.domain,
-                "relative_path": h.relative_path,
-                "resolved_path": str(h.resolved_path) if h.resolved_path else None,
-            }
-            for h in hits[:20]
-        ],
-        "selected": str(best.resolved_path) if best and best.resolved_path else None,
-    }
+    return _find_backup_file(
+        backup_udid_dir=backup_udid_dir,
+        roots=roots,
+        relative_path_substring="AddressBook.sqlitedb",
+        exact_basename="AddressBook.sqlitedb",
+        primary_domain_like="HomeDomain",
+    )
 
 
 def locate_bundle(

@@ -16,7 +16,7 @@ B-ING-1 本身已 ✅（248/248，snapshot `20260422-011824-bing1-ios-addressboo
 | 编号 | 标题 | 紧迫度 | 范围 | 状态 |
 |------|------|--------|------|------|
 | **B-ING-0.1** | Phone normalizer: NL 本地 `06…` → `+316…`（通过 `phonenumbers` + `default_region`） | **HIGH** | 代码 | **✅ 2026-04-22** |
-| **B-ING-1.4** | `ios_backup_locator` 选优：不要选空子库 | MEDIUM | 代码 | open |
+| **B-ING-1.4** | `ios_backup_locator` 选优：不要选空子库 | MEDIUM | 代码 | **✅ 2026-04-22** |
 | **B-ING-1.5** | 清理 DuckDB 里的 T-fixture 污染（174 persons + 8 merge_log） | MEDIUM | 数据 + 测试隔离 | open |
 | **B-ING-1.6** | 加 `merge-candidates enqueue-manual --pair` 子命令 | MEDIUM | 代码 | open |
 | **B-ING-1.7** | `ingest_events.backup` 字段回填最近一次 snapshot 路径/sha | LOW | 代码 | open |
@@ -86,24 +86,39 @@ brain identifiers-repair --kinds phone --dry-run / --apply
 
 ---
 
-## B-ING-1.4 · `ios_backup_locator` 不要选空子库
+## B-ING-1.4 · `ios_backup_locator` 不要选空子库 ✅ 2026-04-22
 
-### 现象
+### 现象（修复前）
 
-`backup-ios-locate` 自动把命中列表里**第一条** `Library/AddressBook/Family/<uuid>:22AddressBook.sqlitedb`（Source ID 22 的来源子库）选为 `selected`，但那份子库 `person_rows: 0`。真正含 248 行的主库 `Library/AddressBook/AddressBook.sqlitedb` 排在列表第 5。
+`backup-ios-locate` 把命中列表里**第一条** `Library/AddressBook/Family/<uuid>:22AddressBook.sqlitedb`（Source ID 22 的来源子库）选为 `selected`，但那份子库 `person_rows: 0`。真正含 248 行的主库 `Library/AddressBook/AddressBook.sqlitedb` 排在列表靠后。B-ING-1 第一次 apply 因此差点把空库当成全量，靠 Kuzu 统计才看出不对。
 
-### 修复方向
+### 修复
 
-在 `locate_bundle` 的选优里：
+`tools/py/src/brain_agents/ios_backup_locator.py` 重构：
 
-1. **硬优先**：若命中 `Library/AddressBook/AddressBook.sqlitedb`（无 `Family/` 子路径），直接选它。
-2. **次优先**：若只命中 Family 子库，用 `sqlite3` 打开取 `SELECT COUNT(*) FROM ABPerson`，选**行数最多的那份**（并附 tie-break 规则）。
-3. CLI 输出里暴露 `candidates`（所有命中 + 各自 `person_count`）+ `selected` 的选择理由字段 `selected_reason`，方便人工验收。
+1. 拆出共享辅助 `_find_backup_file(...)`，`find_addressbook_sqlitedb` / `find_chatstorage_sqlite` 都走它，签名保持向后兼容（`status` / `backup_dir` / `hits` / `selected` 不变）。
+2. 新增 `_select_best_hit(hits, *, exact_basename)` 做排名：
+   - 只考虑物理文件存在的 hit。
+   - **硬优先**：basename 严格等于期望名的优先（`AddressBook.sqlitedb` vs `AddressBook.sqlitedb-wal` / `-shm` / `Family/…` 子库）。
+   - **次优先**：在 exact-basename 桶里按文件 size 降序取最大非零。
+   - **兜底**：全 0 字节时按 `file_id` 字典序取第一个，并把 `selected_reason` 带上 `all_empty_fallback`，让 caller 看得出是兜底。
+3. 返回字段新增：
+   - `selected_reason` —— 人类可读的决策原因（`exact_basename+largest_size_204800`、`exact_basename+all_empty_fallback`、`no_resolved_candidate` 等）。
+   - `selected_size` —— 选中文件的 size，便于 runbook 直接眼看「这 20 KB 肯定空」。
+   - `candidates` —— 排名过的完整候选列表，每条含 `basename` / `size` / `exact_basename_match`。
 
-### 验收
+### 测试
 
-- 本次这份 UDID 备份上重跑 `backup-ios-locate`，`selected` 自动落在 `31/31bb...`（主库）。
-- 单测覆盖：多命中 / 主库缺失 / 全空子库三种场景。
+`tests/test_ios_backup_locator.py`：8 条全绿，覆盖：
+
+- `test_prefers_exact_basename_over_wal_sibling`：WAL 再大也不选。
+- `test_picks_nonempty_when_two_exact_basename_candidates`：同名 0-byte + 150 KB，选 150 KB 那份。
+- `test_reports_reason_when_only_empty_db_available`：`selected_reason` 带 `all_empty_fallback`。
+- `test_candidates_list_exposed_with_size_and_flag`：新字段结构正确。
+- `test_chatstorage_also_uses_ranking`：WhatsApp `.sqlite-shm` sibling 也被正确降权。
+- 其余 3 条：空输入 / 无匹配行 / `domain_like` 过滤的 regression guard。
+
+下游回归：`tests/test_mcp_server.py` + `tests/test_mcp_readonly_tools.py` 5/5 仍绿（他们通过 `locate_bundle` 调 locator，只看 `status` / `selected` 字段）。
 
 ---
 
