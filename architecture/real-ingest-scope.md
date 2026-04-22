@@ -131,7 +131,7 @@ authoritative_at: C:\dev-projects\second-brain-hub\architecture\real-ingest-scop
 | B-ING-4 | ✅ **已完成（2026-04-22）**：WhatsApp 全量（同批完成） | `interactions` 新增 1451，库体量稳定（snapshot 可回滚） | 2h |
 | B-ING-5 | ✅ **已完成（2026-04-22）**：WeChat dry-run + apply（`--since 30d`） | 首次真跑落地，后续按批次扩 chat JSON 覆盖面 | 1d |
 | B-ING-5.1 | Caps+D 文本 → `person_notes` 冒烟验收 | `[people-note: ...]` 能写入 `person_notes` 且 linked_person 命中 | 0.5h |
-| B-ING-6 | Kuzu 重建 + `sync-from-graph` 扫 merge_candidates | 图文件无并发锁；给出候选或明确 0-candidate 原因 | 1h |
+| B-ING-6 | ✅ **已完成（2026-04-22）**：Kuzu 重建 + `sync-from-graph` 复核 | 在单 writer 会话完成 dry-run + apply，结论为 0-candidate no-op | 1h |
 
 **总工时**：~3 个工日，跨度约 1 周（需要真实设备在手 + 外部工具配合）。
 
@@ -168,4 +168,4 @@ authoritative_at: C:\dev-projects\second-brain-hub\architecture\real-ingest-scop
 | 2026-04-22 | **B-ING-3/B-ING-4 收官**：`backup-ios-locate` 命中 `ChatStorage.sqlite`（`7c7f...`，2,039,808 bytes）；先 dry-run（limit 30）后 apply 全量（`rows_seen=1451` / `inserted=1451` / `persons_created=57` / `messages_without_peer=0` / `elapsed_ms=7280.3`）。预先快照 `20260422-091535-bing3-whatsapp-pre-apply.duckdb`（sha `46b6c9c4...`）；审计日志 `ingest-log-recent` 记录 `source=whatsapp_ios mode=apply status=ok`，并自动回填 `backup` 描述。 |
 | 2026-04-22 | **B-ING-5 收官**：`brain wechat-sync --dry-run` 命中 `contact.db`（6192 contacts）+ `chat_20292966501@chatroom.json`（would_insert=50），随后 `brain wechat-sync --since 2026-03-23T11:33:07` 真跑成功：`persons_created=6192`、`identifiers_added=609`（`wechat_alias`）、`interactions_added=50`、`chats_processed=1`、`elapsed_ms=111333.9`。预先快照 `20260422-093307-bing5-wechat-pre-apply.duckdb`（sha `1c8d43da...`）。落库核对：`person_identifiers.kind=wxid` 6192、`kind=wechat_alias` 609、`interactions.source_kind=wechat` 50。 |
 | 2026-04-22 | **B-ING-5.1 收官**：用 `brain text-inbox-ingest` 导入 `[people-note: Hammond]` 样本，落地到 `D:\second-brain-content\99-inbox\_draft\people-note-hammond.md`；postprocess 返回 `people_notes_written=1`、`linked_person=p_0ac7536db641`、`cloud_enqueued=false`。DB 核对新增 `person_notes.source_kind='capsd-people-note'` 行，`detail_json` 包含 `tag_name=Hammond`。 |
-| 2026-04-22 | **B-ING-6 现场阻塞记录**：`graph-stats` 可返回 `Person=1550`，但 `merge-candidates sync-from-graph` 多次遇到 Kuzu 文件并发锁（`Could not set lock on ... brain.kuzu`）；清理残留 `graph-rebuild-if-stale` 进程后可跑通 dry-run，但当前返回 `proposed=0`。后续需在单 writer 窗口完成一次 clean graph rebuild，再复跑 B-ING-6 验证候选是否真实为 0。 |
+| 2026-04-22 | **B-ING-6 ✅ 收官（0-candidate no-op）**：最后一轮在单 writer 窗口先清理残留 `graph-rebuild-if-stale/graph-build` 进程，再执行 `merge-candidates sync-from-graph --dry-run`，结果 `status=ok, proposed=0`（不再是 lock-skipped）。随后按流程先 snapshot `20260422-101439-bing6-final-noop-apply.duckdb`（sha `201a7674...`）再跑 `--apply`，结果 `inserted=0, auto_applied=0`，确认当前图→T3 无新增候选。 |
