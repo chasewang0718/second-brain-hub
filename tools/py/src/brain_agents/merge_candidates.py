@@ -10,6 +10,7 @@ identifiers that slipped past the ingest-time auto-merge.
 from __future__ import annotations
 
 import json
+from functools import lru_cache
 from typing import Any
 
 from brain_memory.structured import execute, fetch_one, query
@@ -17,7 +18,10 @@ from brain_memory.structured import execute, fetch_one, query
 from brain_agents.identity_resolver import merge_persons
 
 
-_GRAPH_KIND_SCORES = {
+# Fallback values if thresholds.yaml is missing keys. Kept identical to the
+# shipped defaults in ``config/thresholds.yaml`` so behavior is stable when
+# the YAML is stripped (e.g. in minimal test fixtures or legacy checkouts).
+_GRAPH_KIND_SCORES_DEFAULT: dict[str, float] = {
     "phone": 0.95,
     "email": 0.92,
     "gmail_addr": 0.92,
@@ -25,7 +29,83 @@ _GRAPH_KIND_SCORES = {
     "wa_jid": 0.93,
     "ios_contact_row": 0.8,
 }
-_GRAPH_DEFAULT_SCORE = 0.6
+_GRAPH_DEFAULT_SCORE_FALLBACK = 0.6
+_AUTO_APPLY_MIN_SCORE_FALLBACK: float | None = None
+
+
+@lru_cache(maxsize=1)
+def _load_merge_queue_config() -> dict[str, Any]:
+    """Read the `merge_queue` block from thresholds.yaml (cached, lazy).
+
+    Returns a dict with at least ``graph_kind_scores`` (dict[str, float]),
+    ``graph_default_score`` (float), and ``auto_apply_min_score``
+    (float | None). Missing / malformed values fall back to the shipped
+    defaults so callers never have to handle partial configs.
+    """
+    kind_scores: dict[str, float] = dict(_GRAPH_KIND_SCORES_DEFAULT)
+    default_score = _GRAPH_DEFAULT_SCORE_FALLBACK
+    default_min_apply: float | None = _AUTO_APPLY_MIN_SCORE_FALLBACK
+
+    try:
+        from brain_core.config import load_thresholds_config
+
+        cfg = load_thresholds_config() or {}
+        block = cfg.get("merge_queue") or {}
+
+        raw_scores = block.get("graph_kind_scores")
+        if isinstance(raw_scores, dict):
+            for k, v in raw_scores.items():
+                try:
+                    kind_scores[str(k)] = float(v)
+                except (TypeError, ValueError):
+                    continue
+
+        raw_default = block.get("graph_default_score")
+        if raw_default is not None:
+            try:
+                default_score = float(raw_default)
+            except (TypeError, ValueError):
+                pass
+
+        raw_min = block.get("auto_apply_min_score")
+        if raw_min is not None:
+            try:
+                parsed = float(raw_min)
+                if 0 < parsed <= 1.0:
+                    default_min_apply = parsed
+                else:
+                    # <=0 means "disabled" in the YAML contract; leave as None.
+                    default_min_apply = None
+            except (TypeError, ValueError):
+                default_min_apply = None
+    except Exception:
+        # Config missing / malformed: fall through to defaults, never raise.
+        pass
+
+    return {
+        "graph_kind_scores": kind_scores,
+        "graph_default_score": default_score,
+        "auto_apply_min_score": default_min_apply,
+    }
+
+
+def _graph_kind_scores() -> dict[str, float]:
+    return _load_merge_queue_config()["graph_kind_scores"]
+
+
+def _graph_default_score() -> float:
+    return _load_merge_queue_config()["graph_default_score"]
+
+
+def _config_auto_apply_min_score() -> float | None:
+    return _load_merge_queue_config()["auto_apply_min_score"]
+
+
+# Back-compat aliases. Some older callers / tests may import these; they now
+# resolve to whatever ``thresholds.yaml`` currently holds (reloaded on import,
+# cached after first access).
+_GRAPH_KIND_SCORES = _graph_kind_scores()
+_GRAPH_DEFAULT_SCORE = _graph_default_score()
 
 
 def list_candidates(*, status: str | None = "pending", limit: int = 50) -> list[dict[str, Any]]:
@@ -264,6 +344,13 @@ def sync_from_graph(
     absorbed->kept recorded in ``merge_log``). Lower-scoring pairs
     stay pending for human review.
 
+    Per-kind scores, the default-kind score, and the default
+    ``auto_apply_min_score`` (used when the caller passes ``None``)
+    are read from ``config/thresholds.yaml → merge_queue`` at
+    process start and cached. Callers passing an explicit
+    ``auto_apply_min_score`` override the YAML default for that
+    invocation only. (B-ING-2)
+
     In ``dry_run=True`` mode nothing is written, but the summary
     still reports how many pairs *would* auto-apply vs stay pending,
     so the weekly cron can surface the counts.
@@ -283,7 +370,17 @@ def sync_from_graph(
     except Exception as exc:  # pragma: no cover - defensive
         return {"status": "skipped", "reason": f"runtime:{exc.__class__.__name__}", "dry_run": bool(dry_run)}
 
-    threshold = _coerce_threshold(auto_apply_min_score)
+    # Explicit caller value wins; otherwise fall back to
+    # ``thresholds.yaml → merge_queue.auto_apply_min_score`` (default 0.0 /
+    # disabled in shipped config → same behavior as before B-ING-2).
+    if auto_apply_min_score is None:
+        effective_min_score = _config_auto_apply_min_score()
+    else:
+        effective_min_score = auto_apply_min_score
+    threshold = _coerce_threshold(effective_min_score)
+
+    kind_scores = _graph_kind_scores()
+    default_score = _graph_default_score()
 
     handled = _already_handled_pairs()
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
@@ -301,8 +398,8 @@ def sync_from_graph(
     for (a, b), evidence in grouped.items():
         kinds = sorted({e["kind"] for e in evidence if e["kind"]})
         score = max(
-            (_GRAPH_KIND_SCORES.get(k, _GRAPH_DEFAULT_SCORE) for k in kinds),
-            default=_GRAPH_DEFAULT_SCORE,
+            (kind_scores.get(k, default_score) for k in kinds),
+            default=default_score,
         )
         proposed.append(
             {

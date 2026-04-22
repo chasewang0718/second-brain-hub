@@ -72,3 +72,37 @@ budget:
 # "86…" regardless of this region, matching existing behavior / tests.
 identity:
   phone_default_region: "NL"
+
+# B-ING-2: T3 merge queue + Kuzu graph->queue scoring.
+# These scores are assigned to proposed merge pairs sourced from the F3 Kuzu
+# `shared_identifier` view. Higher score = more confident the two persons are
+# the same entity. Callers (CLI / MCP / E1 weekly cron) may pass
+# `--auto-apply-min-score` to auto-T2-merge pairs at or above the threshold;
+# everything below stays pending for human review in `brain merge-candidates
+# list`.
+#
+# Tuning guidance:
+#   * phone / wxid / wa_jid: strong strong-kinds, near-impossible to collide
+#     benignly — 0.93-0.95 range.
+#   * email / gmail_addr: shared family inboxes, shared-phone-as-2FA, etc.
+#     make these slightly less trustworthy than phone — 0.92.
+#   * ios_contact_row: stable per-rid but two rids = two cards, so 0.8 just to
+#     tag the pair as "one user deliberately split this".
+#   * default (unknown kind): 0.6 — never auto-merge with unknown signal.
+#
+# The recommended `auto_apply_min_score` = 0.95 auto-merges only phone pairs;
+# email / wxid / wa_jid (0.92/0.93) stay pending. Set to 0 to disable
+# auto-merge entirely (all proposed pairs go to `pending`).
+#
+# Overriding at runtime: the weekly cron reads these; CLI callers may still
+# pass their own `--auto-apply-min-score` which wins for that invocation only.
+merge_queue:
+  graph_kind_scores:
+    phone: 0.95
+    email: 0.92
+    gmail_addr: 0.92
+    wxid: 0.93
+    wa_jid: 0.93
+    ios_contact_row: 0.8
+  graph_default_score: 0.6
+  auto_apply_min_score: 0.0
