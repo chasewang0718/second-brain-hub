@@ -152,3 +152,87 @@ def list_snapshots(dest_root: Path | None = None, *, limit: int = 20) -> list[di
             continue
     out.sort(key=lambda r: r.get("ts_utc", ""), reverse=True)
     return out[: max(1, int(limit))]
+
+
+def _parse_ts_utc(ts: str) -> datetime | None:
+    """Parse the ``YYYYMMDD-HHMMSS`` stamp produced by ``snapshot_duckdb``.
+
+    Older descriptors may carry an ISO-8601 string instead; we support
+    both so a future format bump doesn't silently break lookup.
+    """
+    if not ts:
+        return None
+    s = str(ts).strip()
+    try:
+        return datetime.strptime(s, "%Y%m%d-%H%M%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        pass
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _short_descriptor(desc: dict[str, Any]) -> dict[str, Any]:
+    """Compact shape stored inside ``ingest_events.backup``.
+
+    Keeps the audit trail cheap: snapshot path + sha + ts + label, without
+    echoing the full descriptor (no ``elapsed_ms``/``bytes``/``source``).
+    """
+    return {
+        "snapshot": desc.get("snapshot"),
+        "sha256": desc.get("sha256"),
+        "ts_utc": desc.get("ts_utc"),
+        "label": desc.get("label"),
+        "bytes": desc.get("bytes"),
+    }
+
+
+def latest_snapshot(
+    *,
+    label_prefix: str | None = None,
+    max_age_minutes: int | None = 120,
+    now: datetime | None = None,
+    dest_root: Path | None = None,
+) -> dict[str, Any] | None:
+    """Return the most recent snapshot descriptor, or ``None``.
+
+    B-ING-1.7: ``contacts-ingest-ios`` / ``whatsapp-ingest-ios`` call
+    this to auto-fill ``ingest_events.backup`` with the snapshot created
+    by the prior ``ingest-backup-now`` run.
+
+    Filters (applied in order):
+
+    - ``label_prefix`` — only consider descriptors whose ``label`` starts
+      with this string (case-insensitive). ``None`` = accept any label.
+    - ``max_age_minutes`` — drop descriptors older than this (default
+      120 min). Operator is expected to snapshot right before ingest;
+      >2h old is almost certainly an unrelated earlier backup we
+      shouldn't attribute to this ingest. ``None`` or ``<=0`` = no cap.
+
+    Descriptors with an unparsable ``ts_utc`` are skipped (safer than
+    accidentally associating them with the wrong ingest).
+    """
+    snaps = list_snapshots(dest_root, limit=200)
+    if not snaps:
+        return None
+
+    ref_now = (now or datetime.now(timezone.utc))
+    if ref_now.tzinfo is None:
+        ref_now = ref_now.replace(tzinfo=timezone.utc)
+    cap = max_age_minutes if (max_age_minutes is not None and max_age_minutes > 0) else None
+    prefix = (label_prefix or "").strip().lower()
+
+    for desc in snaps:  # already sorted newest-first
+        if prefix:
+            if not str(desc.get("label") or "").lower().startswith(prefix):
+                continue
+        if cap is not None:
+            ts = _parse_ts_utc(str(desc.get("ts_utc") or ""))
+            if ts is None:
+                continue
+            age_min = (ref_now - ts).total_seconds() / 60.0
+            if age_min > cap:
+                continue
+        return desc
+    return None

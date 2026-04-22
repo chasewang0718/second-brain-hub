@@ -19,7 +19,7 @@ B-ING-1 本身已 ✅（248/248，snapshot `20260422-011824-bing1-ios-addressboo
 | **B-ING-1.4** | `ios_backup_locator` 选优：不要选空子库 | MEDIUM | 代码 | **✅ 2026-04-22** |
 | **B-ING-1.5** | 清理 DuckDB 里的 T-fixture 污染 + pytest 真隔离 | MEDIUM | 数据 + 测试隔离 | **✅ 2026-04-22** |
 | **B-ING-1.6** | 加 `merge-candidates enqueue-manual` 子命令 | MEDIUM | 代码 | **✅ 2026-04-22** |
-| **B-ING-1.7** | `ingest_events.backup` 字段回填最近一次 snapshot 路径/sha | LOW | 代码 | open |
+| **B-ING-1.7** | `ingest_events.backup` 字段回填最近一次 snapshot 路径/sha | LOW | 代码 | **✅ 2026-04-22** |
 | **B-ING-1.8** | 手动处理 9 组真·重复 | MEDIUM | 数据 | **✅ 9/9 2026-04-22** |
 | **B-ING-1.9** | `contacts-ingest-ios` 幂等性真跑 | MEDIUM | 测试 | **✅ 2026-04-22** |
 | **B-ING-1.10** | `identifiers-repair --dry-run` 不应写 `merge_candidates`（且应按 (person_a, person_b) 去重） | LOW | 代码 | **✅ 2026-04-22** |
@@ -222,15 +222,65 @@ brain merge-candidates enqueue-manual p_cheng_personal p_cheng_work \
 
 ---
 
-## B-ING-1.7 · `ingest_events.backup` 字段回填
+## B-ING-1.7 · `ingest_events.backup` 字段回填 ✅ 2026-04-22
 
-### 现象
+### 现象（修复前）
 
-本次 apply 的 `ingest-log-recent` 审计行 `backup: null`——`ingest-backup-now` 生成的 snapshot 路径/sha 没有被关联到该次 ingest 事件。
+B-ING-1 真·apply 后 `brain ingest-log-recent` 的审计行 `backup: null`。`brain ingest-backup-now` 生成的 snapshot 路径/sha 没有被关联到该次 ingest 事件，回滚时需要肉眼去 `_backup/telemetry/pointer-log.jsonl` 里按时间找最近一条，容易认错。
 
-### 修复方向
+### 修复
 
-`contacts_ingest_ios` 的事务入口处读取「最近一次成功 `ingest-backup-now` 的 label 前缀匹配」或**显式接收** `--snapshot-ref` 参数；事件写入时把 `{path, sha256, ts_utc}` 填进 `backup` 字段。次选：在 `ingest-backup-now` 里把结果写到一个小表 `ingest_snapshots`，ingest 事件持 id 引用。
+两件事：
+
+**1. `brain_agents/ingest_backup.py` 新增 `latest_snapshot(*, label_prefix, max_age_minutes=120, now=..., dest_root=...)`**
+
+- 读 `pointer-log.jsonl`，按 `ts_utc` 倒序扫描。
+- `label_prefix` 做**大小写不敏感 startswith 匹配**（`ios-addressbook` 匹配 `ios-addressbook-pre-apply` / `ios-addressbook-redo`）；`None` = 任意 label。
+- `max_age_minutes` 默认 **120**（操作流程是先 snapshot 立即 apply，>2h 老快照大概率是别的事件的）；`None` 或 `<=0` = 不限。
+- 无法解析 `ts_utc` 的条目直接跳过，避免错关联。
+- 找不到时返回 `None`。
+
+同时新增 `_short_descriptor(desc)` — 把完整 descriptor 收窄成 `{snapshot, sha256, ts_utc, label, bytes}`，写进 `ingest_events.backup` 时字段更克制（不重复 `elapsed_ms` / `source` 这类不必要的）。
+
+**2. `brain_cli.main` 的 `contacts-ingest-ios` / `whatsapp-ingest-ios` CLI 入口**
+
+新增两个 flag：
+- `--snapshot-ref <path>` — 显式指定要归属的 `.duckdb` snapshot 路径（pointer-log 里有匹配才算数，没有就按 None 走）。
+- `--snapshot-max-age-minutes 120` — auto-pick 窗口；`0` = 不限。
+
+挑选顺序：
+1. `--snapshot-ref` 显式命中 → 用；
+2. 否则 `latest_snapshot(label_prefix="ios-addressbook" / "whatsapp", max_age_minutes=...)`；
+3. 再兜底 `latest_snapshot(label_prefix=None, max_age_minutes=...)`（防止操作员打错 label）；
+4. `--dry-run` 时**跳过 auto-pick**（dry-run 不应该认领真 snapshot）。
+
+选中的 descriptor 经 `_short_descriptor` 压扁后以 `backup_descriptor=` 传给 `ingest_address_book_sqlite` / `ingest_chatstorage_sqlite`，agent 内部原有的 `log_ingest_event(..., backup=backup_descriptor)` 自动把它写进 JSONL 的 `backup` 字段。
+
+### 测试
+
+`tests/test_ingest_backup.py` 新增 6 条：
+- `test_latest_snapshot_prefers_label_prefix`：4 条 snapshot 里 2 条 `ios-addressbook*`，挑出最新那条。
+- `test_latest_snapshot_respects_age_cap`：180 min 老的 snapshot + 120 min cap → `None`；放到 240 min cap → 找回。
+- `test_latest_snapshot_prefix_miss_returns_none`：`wechat` 前缀无匹配时返回 `None`（不静默退回全库最新，避免错关联）。
+- `test_latest_snapshot_falls_back_to_newest_when_no_prefix`：`label_prefix=None` 时返回全库最新。
+- `test_latest_snapshot_empty_returns_none`：无 pointer-log 文件时安全返回。
+- `test_short_descriptor_keeps_audit_fields`：只留 `{snapshot, sha256, ts_utc, label, bytes}`。
+
+回归：
+- `pytest tests/test_ingest_backup.py` 10/10（含原 4 条）。
+- `pytest tests/test_ingest_log.py` 5/5：`test_log_apply_writes_jsonl` 本就验证 `ev["backup"]["sha256"] == "abc"` 能端到端穿过 JSONL。
+- 全量 `pytest tests/` **232/232** 绿。
+
+### 用法
+
+```
+brain ingest-backup-now --label ios-addressbook-pre-apply
+brain contacts-ingest-ios                     # 自动把上面那条 snapshot 写进 backup 字段
+brain contacts-ingest-ios --snapshot-ref "D:/.../_backup/telemetry/20260422-093000-ios-addressbook-pre-apply.duckdb"   # 显式覆盖
+brain ingest-log-recent --days 1              # 审计行 backup.{snapshot,sha256,ts_utc,label,bytes} 都有值
+```
+
+后续如果 pointer-log 增速变快（比如一天几十次），可以加 `ingest_snapshots` DuckDB 表按 id 索引；目前线性扫 200 行足够。
 
 ---
 

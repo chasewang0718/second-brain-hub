@@ -694,10 +694,22 @@ def backup_ios_locate_cmd(
 def contacts_ingest_ios_cmd(
     db_path: str = typer.Option("", "--db", help="AddressBook.sqlitedb (auto-locate when omitted)"),
     dry_run: bool = typer.Option(False, "--dry-run"),
+    snapshot_ref: str = typer.Option(
+        "",
+        "--snapshot-ref",
+        help="Explicit snapshot .duckdb path to attribute (overrides auto-pick)",
+    ),
+    snapshot_max_age_minutes: int = typer.Option(
+        120,
+        "--snapshot-max-age-minutes",
+        min=0,
+        help="Auto-pick window for latest ingest-backup-now snapshot (0 = no cap)",
+    ),
 ) -> None:
     from pathlib import Path
 
     from brain_agents.contacts_ingest_ios import ingest_address_book_sqlite
+    from brain_agents.ingest_backup import _short_descriptor, latest_snapshot, list_snapshots
     from brain_agents.ios_backup_locator import find_addressbook_sqlitedb
 
     p = Path(db_path) if db_path.strip() else None
@@ -708,7 +720,32 @@ def contacts_ingest_ios_cmd(
             typer.echo(json.dumps({"status": "error", "reason": "missing_db", "hint": hit}, ensure_ascii=False, indent=2))
             raise typer.Exit(code=1)
         p = Path(sel)
-    typer.echo(json.dumps(ingest_address_book_sqlite(p, dry_run=dry_run), ensure_ascii=False, indent=2, default=str))
+
+    backup_desc: dict | None = None
+    if snapshot_ref.strip():
+        ref = snapshot_ref.strip()
+        for s in list_snapshots(limit=200):
+            if str(s.get("snapshot") or "") == ref:
+                backup_desc = _short_descriptor(s)
+                break
+    elif not dry_run:
+        desc = latest_snapshot(
+            label_prefix="ios-addressbook",
+            max_age_minutes=snapshot_max_age_minutes,
+        )
+        if desc is None:
+            desc = latest_snapshot(max_age_minutes=snapshot_max_age_minutes)
+        if desc is not None:
+            backup_desc = _short_descriptor(desc)
+
+    typer.echo(
+        json.dumps(
+            ingest_address_book_sqlite(p, dry_run=dry_run, backup_descriptor=backup_desc),
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+    )
 
 
 @app.command("whatsapp-ingest-ios")
@@ -716,9 +753,21 @@ def whatsapp_ingest_ios_cmd(
     db_path: str = typer.Option("", "--db", help="ChatStorage.sqlite (auto-locate when omitted)"),
     dry_run: bool = typer.Option(False, "--dry-run"),
     limit: int = typer.Option(0, "--limit", min=0, help="Max messages to import (0 = all)"),
+    snapshot_ref: str = typer.Option(
+        "",
+        "--snapshot-ref",
+        help="Explicit snapshot .duckdb path to attribute (overrides auto-pick)",
+    ),
+    snapshot_max_age_minutes: int = typer.Option(
+        120,
+        "--snapshot-max-age-minutes",
+        min=0,
+        help="Auto-pick window for latest ingest-backup-now snapshot (0 = no cap)",
+    ),
 ) -> None:
     from pathlib import Path
 
+    from brain_agents.ingest_backup import _short_descriptor, latest_snapshot, list_snapshots
     from brain_agents.ios_backup_locator import find_chatstorage_sqlite
     from brain_agents.whatsapp_ingest_ios import ingest_chatstorage_sqlite
 
@@ -730,8 +779,33 @@ def whatsapp_ingest_ios_cmd(
             typer.echo(json.dumps({"status": "error", "reason": "missing_db", "hint": hit}, ensure_ascii=False, indent=2))
             raise typer.Exit(code=1)
         p = Path(sel)
+
+    backup_desc: dict | None = None
+    if snapshot_ref.strip():
+        ref = snapshot_ref.strip()
+        for s in list_snapshots(limit=200):
+            if str(s.get("snapshot") or "") == ref:
+                backup_desc = _short_descriptor(s)
+                break
+    elif not dry_run:
+        desc = latest_snapshot(
+            label_prefix="whatsapp",
+            max_age_minutes=snapshot_max_age_minutes,
+        )
+        if desc is None:
+            desc = latest_snapshot(max_age_minutes=snapshot_max_age_minutes)
+        if desc is not None:
+            backup_desc = _short_descriptor(desc)
+
     lim = None if limit <= 0 else limit
-    typer.echo(json.dumps(ingest_chatstorage_sqlite(p, dry_run=dry_run, limit=lim), ensure_ascii=False, indent=2, default=str))
+    typer.echo(
+        json.dumps(
+            ingest_chatstorage_sqlite(p, dry_run=dry_run, limit=lim, backup_descriptor=backup_desc),
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+    )
 
 
 @app.command("ingest-backup-now")
