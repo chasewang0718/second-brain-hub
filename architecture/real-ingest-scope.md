@@ -30,7 +30,7 @@ authoritative_at: C:\dev-projects\second-brain-hub\architecture\real-ingest-scop
 |---|---|---|---|---|
 | iOS AddressBook（通讯录） | ✅ `contacts_ingest_ios.ingest_address_book_sqlite` | ❌ | ❌ | **P0**（最容易，收益最高） |
 | iOS WhatsApp | ✅ `whatsapp_ingest_ios.ingest_chatstorage_sqlite` | ✅（2026-04-22） | ✅（2026-04-22） | P1 |
-| WeChat（wechat-decoder 产物） | ✅ `wechat_sync.sync_all` | ❌ | ❌ | P2（依赖外部解包工具） |
+| WeChat（wechat-decoder 产物） | ✅ `wechat_sync.sync_all` | ✅（2026-04-22） | ✅（2026-04-22） | P2（依赖外部解包工具） |
 | WeChat remark 抽取 | ✅ `wechat_remark_extract` | n/a（纯函数） | n/a | 随 P2 一起 |
 
 **关键观察**：代码侧阻塞 = 0；**流程 & 前置条件**阻塞 = 全部。
@@ -129,7 +129,7 @@ authoritative_at: C:\dev-projects\second-brain-hub\architecture\real-ingest-scop
 | B-ING-2 | T3 阈值再评估（基于 B-ING-1 的真实分布） | 阈值 hard-coded 改为 config 驱动 | 2h |
 | B-ING-3 | ✅ **已完成（2026-04-22）**：WhatsApp dry-run + apply（1451 rows） | 抽样消息时间/peer/preview 与设备侧一致 | 2h |
 | B-ING-4 | ✅ **已完成（2026-04-22）**：WhatsApp 全量（同批完成） | `interactions` 新增 1451，库体量稳定（snapshot 可回滚） | 2h |
-| B-ING-5 | WeChat dry-run → remark 抽取复核 → apply (--since 30d) | remark 命中率 ≥ 80% | 1d |
+| B-ING-5 | ✅ **已完成（2026-04-22）**：WeChat dry-run + apply（`--since 30d`） | 首次真跑落地，后续按批次扩 chat JSON 覆盖面 | 1d |
 | B-ING-6 | 三条线 ingest 全跑完后重建 Kuzu + 扫 merge_candidates | F3 给出 ≥ 10 条高分候选 | 1h |
 
 **总工时**：~3 个工日，跨度约 1 周（需要真实设备在手 + 外部工具配合）。
@@ -165,3 +165,4 @@ authoritative_at: C:\dev-projects\second-brain-hub\architecture\real-ingest-scop
 | 2026-04-21 | 首版；4 条线 × 4 公共门槛 × 7 步上线路线。 |
 | 2026-04-22 | PC-1~PC-4 节与 B-ING-0 实现对齐；PC-3 补充 `started_at` 字段说明；删除「只写文档」旧段落。 |
 | 2026-04-22 | **B-ING-3/B-ING-4 收官**：`backup-ios-locate` 命中 `ChatStorage.sqlite`（`7c7f...`，2,039,808 bytes）；先 dry-run（limit 30）后 apply 全量（`rows_seen=1451` / `inserted=1451` / `persons_created=57` / `messages_without_peer=0` / `elapsed_ms=7280.3`）。预先快照 `20260422-091535-bing3-whatsapp-pre-apply.duckdb`（sha `46b6c9c4...`）；审计日志 `ingest-log-recent` 记录 `source=whatsapp_ios mode=apply status=ok`，并自动回填 `backup` 描述。 |
+| 2026-04-22 | **B-ING-5 收官**：`brain wechat-sync --dry-run` 命中 `contact.db`（6192 contacts）+ `chat_20292966501@chatroom.json`（would_insert=50），随后 `brain wechat-sync --since 2026-03-23T11:33:07` 真跑成功：`persons_created=6192`、`identifiers_added=609`（`wechat_alias`）、`interactions_added=50`、`chats_processed=1`、`elapsed_ms=111333.9`。预先快照 `20260422-093307-bing5-wechat-pre-apply.duckdb`（sha `1c8d43da...`）。落库核对：`person_identifiers.kind=wxid` 6192、`kind=wechat_alias` 609、`interactions.source_kind=wechat` 50。 |
