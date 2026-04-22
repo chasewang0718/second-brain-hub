@@ -1,7 +1,8 @@
 ---
 title: B-ING-1 · 首次 apply 的 follow-ups
-status: open
+status: all_closed
 created: 2026-04-22
+closed: 2026-04-22
 authoritative_at: C:\dev-projects\second-brain-hub\architecture\bing1-followups.md
 related:
   - architecture/bing1-runbook.md
@@ -11,7 +12,9 @@ related:
 # B-ING-1 · 首次 apply 的 follow-ups
 
 B-ING-1 本身已 ✅（248/248，snapshot `20260422-011824-bing1-ios-addressbook.duckdb`，sha `53ad43bd…`）。  
-本文档只记录真跑之后冒出来、**不阻塞打勾**、但**必须在 B-ING-3 WhatsApp 上线前**处理的问题。
+本文档记录真跑之后冒出来、**不阻塞打勾**、但**必须在 B-ING-3 WhatsApp 上线前**处理的问题。
+
+**2026-04-22 收官**：9 条 follow-up（0.1 / 1.4 / 1.5 / 1.6 / 1.7 / 1.8 / 1.9 / 1.10 / 1.11）**全部 ✅**。全量 `pytest tools/py/tests/` **232/232** 绿。B-ING-3 WhatsApp 可开工。
 
 | 编号 | 标题 | 紧迫度 | 范围 | 状态 |
 |------|------|--------|------|------|
