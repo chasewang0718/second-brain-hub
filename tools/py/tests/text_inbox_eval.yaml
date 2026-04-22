@@ -1,0 +1,45 @@
+version: 1
+description: "A2 text-inbox route / pii regression golden set"
+cases:
+  - id: route_concept_cn
+    text: |
+      这是一个关于定义和原理的笔记，顺便记录 concept 框架。
+    expect:
+      status: archived
+      route: 01-concepts/inbox-auto
+  - id: route_project_mixed
+    text: |
+      project roadmap milestone todo:
+      这周需求拆解成三个阶段。
+    expect:
+      status: archived
+      route: 03-projects/inbox-auto
+  - id: route_journal_cn
+    text: |
+      today journal reflection
+      今天复盘了一个习惯实验。
+    expect:
+      status: archived
+      route: 04-journal
+  - id: route_low_confidence_to_draft
+    text: |
+      random note without known routing keywords.
+    expect:
+      status: archived
+      route: 99-inbox/_draft
+  - id: pii_email_block
+    text: |
+      联系方式：alice@example.com
+      这是隐私信息，应该被阻断而不是归档。
+    expect:
+      status: blocked
+      route: tier_c_candidate
+      pii_contains: email
+  - id: pii_bsn_block
+    text: |
+      bsn: 123456789
+      请不要归档。
+    expect:
+      status: blocked
+      route: tier_c_candidate
+      pii_contains: bsn_like

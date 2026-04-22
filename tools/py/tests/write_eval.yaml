@@ -1,0 +1,15 @@
+version: 1
+description: "A4 write-assist baseline checks (template path, deterministic)"
+cases:
+  - id: zh_xiaohongshu
+    topic: "第二大脑的最小可行习惯"
+    platform: "xiaohongshu"
+    reader: "想搭建个人知识系统的新手"
+  - id: en_linkedin
+    topic: "How to keep weekly reviews lightweight"
+    platform: "linkedin"
+    reader: "busy solo founders"
+  - id: zh_default
+    topic: "如何避免写作里的空话"
+    platform: "default"
+    reader: "内容创作者"

@@ -29,7 +29,7 @@ authoritative_at: C:\dev-projects\second-brain-hub\architecture\real-ingest-scop
 | 数据源 | 代码就绪 | 已 dry-run 真数据？ | 已 apply 真数据？ | 门槛优先级 |
 |---|---|---|---|---|
 | iOS AddressBook（通讯录） | ✅ `contacts_ingest_ios.ingest_address_book_sqlite` | ❌ | ❌ | **P0**（最容易，收益最高） |
-| iOS WhatsApp | ✅ `whatsapp_ingest_ios.ingest_chatstorage_sqlite` | ❌ | ❌ | P1 |
+| iOS WhatsApp | ✅ `whatsapp_ingest_ios.ingest_chatstorage_sqlite` | ✅（2026-04-22） | ✅（2026-04-22） | P1 |
 | WeChat（wechat-decoder 产物） | ✅ `wechat_sync.sync_all` | ❌ | ❌ | P2（依赖外部解包工具） |
 | WeChat remark 抽取 | ✅ `wechat_remark_extract` | n/a（纯函数） | n/a | 随 P2 一起 |
 
@@ -127,8 +127,8 @@ authoritative_at: C:\dev-projects\second-brain-hub\architecture\real-ingest-scop
 | B-ING-0 | ✅ **已完成（2026-04-21）**：`brain ingest-backup-now` + 三表事务包裹 + jsonl 日志 | PC-1 / PC-3 / PC-4 全过 | 4h |
 | B-ING-1 | ✅ **已完成（2026-04-22）**：AddressBook 主库 apply 248/248，snapshot `20260422-011824-bing1-ios-addressbook.duckdb`。事后发现 5 项问题 → **`bing1-followups.md`**（runbook: `bing1-runbook.md`） | T3 清空，person 数增量与通讯录条目数匹配 ±5% | 1d（含观察期） |
 | B-ING-2 | T3 阈值再评估（基于 B-ING-1 的真实分布） | 阈值 hard-coded 改为 config 驱动 | 2h |
-| B-ING-3 | WhatsApp 真跑（--limit 1000） | 抽 20 条消息对照原设备确认无错位 | 2h |
-| B-ING-4 | WhatsApp 全量 | interactions 表不爆（< 500 MB） | 2h |
+| B-ING-3 | ✅ **已完成（2026-04-22）**：WhatsApp dry-run + apply（1451 rows） | 抽样消息时间/peer/preview 与设备侧一致 | 2h |
+| B-ING-4 | ✅ **已完成（2026-04-22）**：WhatsApp 全量（同批完成） | `interactions` 新增 1451，库体量稳定（snapshot 可回滚） | 2h |
 | B-ING-5 | WeChat dry-run → remark 抽取复核 → apply (--since 30d) | remark 命中率 ≥ 80% | 1d |
 | B-ING-6 | 三条线 ingest 全跑完后重建 Kuzu + 扫 merge_candidates | F3 给出 ≥ 10 条高分候选 | 1h |
 
@@ -164,3 +164,4 @@ authoritative_at: C:\dev-projects\second-brain-hub\architecture\real-ingest-scop
 |---|---|
 | 2026-04-21 | 首版；4 条线 × 4 公共门槛 × 7 步上线路线。 |
 | 2026-04-22 | PC-1~PC-4 节与 B-ING-0 实现对齐；PC-3 补充 `started_at` 字段说明；删除「只写文档」旧段落。 |
+| 2026-04-22 | **B-ING-3/B-ING-4 收官**：`backup-ios-locate` 命中 `ChatStorage.sqlite`（`7c7f...`，2,039,808 bytes）；先 dry-run（limit 30）后 apply 全量（`rows_seen=1451` / `inserted=1451` / `persons_created=57` / `messages_without_peer=0` / `elapsed_ms=7280.3`）。预先快照 `20260422-091535-bing3-whatsapp-pre-apply.duckdb`（sha `46b6c9c4...`）；审计日志 `ingest-log-recent` 记录 `source=whatsapp_ios mode=apply status=ok`，并自动回填 `backup` 描述。 |
