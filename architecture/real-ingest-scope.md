@@ -125,7 +125,7 @@ authoritative_at: C:\dev-projects\second-brain-hub\architecture\real-ingest-scop
 | 步骤 | 内容 | 退出标志 | 工时 |
 |---:|---|---|---:|
 | B-ING-0 | ✅ **已完成（2026-04-21）**：`brain ingest-backup-now` + 三表事务包裹 + jsonl 日志 | PC-1 / PC-3 / PC-4 全过 | 4h |
-| B-ING-1 | AddressBook 真跑 dry-run → review → apply — **Runbook: `bing1-runbook.md`** | T3 清空，person 数增量与通讯录条目数匹配 ±5% | 1d（含观察期） |
+| B-ING-1 | ✅ **已完成（2026-04-22）**：AddressBook 主库 apply 248/248，snapshot `20260422-011824-bing1-ios-addressbook.duckdb`。事后发现 5 项问题 → **`bing1-followups.md`**（runbook: `bing1-runbook.md`） | T3 清空，person 数增量与通讯录条目数匹配 ±5% | 1d（含观察期） |
 | B-ING-2 | T3 阈值再评估（基于 B-ING-1 的真实分布） | 阈值 hard-coded 改为 config 驱动 | 2h |
 | B-ING-3 | WhatsApp 真跑（--limit 1000） | 抽 20 条消息对照原设备确认无错位 | 2h |
 | B-ING-4 | WhatsApp 全量 | interactions 表不爆（< 500 MB） | 2h |
