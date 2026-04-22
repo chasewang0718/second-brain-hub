@@ -129,16 +129,23 @@ def ingest_address_book_sqlite(
                 )
                 stats["persons_created"] += 1
             else:
-                register_identifier(pid, "ios_contact_row", stable, source_kind="ios_addressbook")
+                r = register_identifier(pid, "ios_contact_row", stable, source_kind="ios_addressbook")
+                pid = r.get("person_id") or pid
 
+            # Follow survivor pid after every register_identifier: strong-kind
+            # auto-T2 merges inside register_identifier may absorb our local pid,
+            # and subsequent inserts must target the surviving person row to
+            # avoid orphan person_identifiers (B-ING-1.12).
             for ph in phones:
                 r = register_identifier(pid, "phone", ph, source_kind="ios_addressbook")
                 if r.get("status") == "ok":
                     stats["identifiers_added"] += 1
+                pid = r.get("person_id") or pid
             for em in emails:
                 r = register_identifier(pid, "email", em, source_kind="ios_addressbook")
                 if r.get("status") == "ok":
                     stats["identifiers_added"] += 1
+                pid = r.get("person_id") or pid
 
     t0 = time.monotonic()
     try:

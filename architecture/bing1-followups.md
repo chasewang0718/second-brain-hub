@@ -14,7 +14,7 @@ related:
 B-ING-1 本身已 ✅（248/248，snapshot `20260422-011824-bing1-ios-addressbook.duckdb`，sha `53ad43bd…`）。  
 本文档记录真跑之后冒出来、**不阻塞打勾**、但**必须在 B-ING-3 WhatsApp 上线前**处理的问题。
 
-**2026-04-22 收官**：9 条 follow-up（0.1 / 1.4 / 1.5 / 1.6 / 1.7 / 1.8 / 1.9 / 1.10 / 1.11）**全部 ✅**。全量 `pytest tools/py/tests/` **232/232** 绿。B-ING-3 WhatsApp 可开工。
+**2026-04-22 收官**：10 条 follow-up（0.1 / 1.4 / 1.5 / 1.6 / 1.7 / 1.8 / 1.9 / 1.10 / 1.11 / **1.12**）**全部 ✅**。全量 `pytest tools/py/tests/` **234/234** 绿。B-ING-3 WhatsApp 可开工。
 
 | 编号 | 标题 | 紧迫度 | 范围 | 状态 |
 |------|------|--------|------|------|
@@ -27,6 +27,7 @@ B-ING-1 本身已 ✅（248/248，snapshot `20260422-011824-bing1-ios-addressboo
 | **B-ING-1.9** | `contacts-ingest-ios` 幂等性真跑 | MEDIUM | 测试 | **✅ 2026-04-22** |
 | **B-ING-1.10** | `identifiers-repair --dry-run` 不应写 `merge_candidates`（且应按 (person_a, person_b) 去重） | LOW | 代码 | **✅ 2026-04-22** |
 | **B-ING-1.11** | `merge_persons` 应自动把 absorbed.primary_name append 到 kept.aliases_json | MEDIUM | 代码 | **✅ 2026-04-22** |
+| **B-ING-1.12** | `contacts-ingest-ios` 在 auto-T2 merge 后未跟踪 survivor pid → orphan `person_identifiers` | **HIGH** | 代码 + 数据 | **✅ 2026-04-22** |
 
 ---
 
@@ -450,3 +451,92 @@ B-ING-1.8 里，每次合并都要人肉把 absorbed.primary_name 手写进 kept
 `stats["identifiers_added"]` 按 `register_identifier` 返回 `status="ok"` 计数，而 `ok` 在 `ON CONFLICT DO NOTHING` 时也返回 —— 所以第一次真跑时该计数会**虚高**（包括 no-op 的 upsert）。不影响幂等结论，但 B-ING-3 WhatsApp 上线前可以顺手修成按实际影响行数计。
 
 若不幂等 → 在 B-ING-1.8 之前补上 "已存在的 `value_normalized` 不再新建 person，而是挂到既有 person" 的逻辑。
+
+---
+
+## B-ING-1.12 · `contacts-ingest-ios` 未跟踪 auto-T2 survivor pid → orphan identifiers ✅ 2026-04-22
+
+### 现象（修复前）
+
+B-ING-1 全部 follow-up 收官后做宏观验收时发现：`persons`=213，但"至少有 1 个 identifier 的 person_id 个数"=214。差出来的 1 是一组 orphan —— 展开发现 **3 条 `person_identifiers` 的 `person_id` 在 `persons` 表里不存在**：
+
+| `id` | 被孤立的 `person_id` | `kind` | `value_normalized` |
+|-----:|----------------------|--------|--------------------|
+| 522 | `p_ac8da4f9ac38` | email | `amirnesta@gmail.com` |
+| 534 | `p_5e98869f465c` | email | `h.oosterhuis119@outlook.com` |
+| 542 | `p_fa3b50ec34a2` | email | `astone.shi@gmail.com` |
+
+三条全部是 B-ING-1 首次 apply 时写入的真邮箱，都带 `source_kind='ios_addressbook'`。
+
+影响：`brain who <email>` 对这三个地址返回空 —— **19 封 ingest 邮箱里 16% 不可解析**。
+
+### 根因
+
+`identity_resolver.register_identifier`（strong kind 分支）在发现该 identifier 已被别的 person 持有时，触发 `merge_persons(kept, absorbed, "auto_t2_strong_identifier")`，然后**把函数内局部 `person_id` 变量改写为 `kept`**，并返回 `{"status": "ok", "person_id": kept, ...}`。
+
+问题不在 `register_identifier` —— 它已经把 survivor pid 返回了。问题在 **caller（`contacts_ingest_ios._apply`）没有接这个返回值**：
+
+```python
+# BEFORE（bug）
+for ph in phones:
+    r = register_identifier(pid, "phone", ph, ...)   # ← phone 撞到别人，触发 auto-T2 merge
+    # pid 此时可能已经被 absorbed，但本地变量没更新
+for em in emails:
+    r = register_identifier(pid, "email", em, ...)   # ← 用已经消失的 pid 插入 → orphan!
+```
+
+`person_identifiers` 表**没有外键约束**（只有 `UNIQUE(person_id, kind, value_normalized)`），所以"往不存在的 person 插入 identifier"不会报错 —— 静默写入，留下孤儿行。
+
+生产 3 条 orphan 的触发路径都是同一模式：iOS 卡里先挂 phone（这个 phone 别人已经在用，触发 auto-T2 merge，local pid 被 absorbed），后挂 email（用已失效的 pid 插入）。
+
+### 修复
+
+**caller 跟踪 survivor pid**（`tools/py/src/brain_agents/contacts_ingest_ios.py`）：
+
+```python
+# AFTER
+for ph in phones:
+    r = register_identifier(pid, "phone", ph, ...)
+    if r.get("status") == "ok":
+        stats["identifiers_added"] += 1
+    pid = r.get("person_id") or pid   # ← 跟住 merge survivor
+for em in emails:
+    r = register_identifier(pid, "email", em, ...)
+    if r.get("status") == "ok":
+        stats["identifiers_added"] += 1
+    pid = r.get("person_id") or pid
+```
+
+同时在 `identity_resolver`：
+
+1. **`register_identifier` 补 docstring**：显式写清 caller 的义务 —— strong-kind auto-T2 merge 后必须 follow 返回的 `person_id`，忽略返回值会泄漏 orphan。
+2. **`ensure_person_with_seed` 同步加固**：当 `seed_identifiers` 里某一条触发 auto-T2 时，返回的 pid 必须是 survivor，而不是刚刚新建的那个（现在 iOS 只传 1 个 weak-kind seed 不会触发，但接口契约上这是潜在坑）。
+
+3. **WhatsApp ingest** (`whatsapp_ingest_ios.py`) 当前只对每条消息的 peer 做 1 次 `resolve_identifier` + 缺则 `ensure_person_with_seed(…, seed=[("wa_jid", peer)])`，没有"先挂 A 再挂 B"的多-identifier 循环 —— 随着 `ensure_person_with_seed` 的加固，**自动免疫**同类 bug。不需要改 WhatsApp 代码。
+
+### 测试
+
+新增 `tests/test_contacts_ingest_ios_orphan_regression.py`：
+
+| 用例 | 场景 | 断言 |
+|------|------|------|
+| `test_phone_collision_does_not_leak_orphan_email` | 两张 iOS 卡共享同一 phone、各带一个不同 email（复刻生产 bug 路径） | `person_identifiers` 没有任何 orphan；两个 email 都指向同一个 survivor；survivor 存在于 `persons` |
+| `test_phone_collision_survives_reingest` | 同一份书第二次 apply | `persons_created=0`，orphan 保持 0 |
+
+全量 `pytest tools/py/` **234/234 绿**（含新 2 条）。
+
+### 生产数据清理
+
+1. 执行前 snapshot：`20260422-090206-bing1.12-orphan-cleanup.duckdb`（sha `9b691472…`，49.3 MB）。
+2. 对每条 orphan，从 `merge_log.absorbed_person_id` 回查 `kept_person_id`（顺着 merge 链最多走 10 跳）；若 survivor 还在且没有同一 identifier，reparent；否则删。
+3. 3 条全部 reparent 成功：
+   - `amirnesta@gmail.com`      → `p_256e3b0e6f2a`
+   - `h.oosterhuis119@outlook.com` → `p_3cf988cbd985`
+   - `astone.shi@gmail.com`     → `p_ce0c73b93893`
+4. 复查：orphan `person_identifiers` = **0**。
+
+### 影响
+
+- B-ING-3 WhatsApp ingest 以及所有未来要在"单条 ingest 内挂多个 strong-kind identifier"的路径**不会再掉进这个坑**（代码层）。
+- 3 个真邮箱现在能通过 `brain who` / `resolve_identifier` 解析了。
+- 该 bug 的存在时间只有 B-ING-1 那一次真 apply，数据量可控（3 / 19 = 16%），已全部修复。

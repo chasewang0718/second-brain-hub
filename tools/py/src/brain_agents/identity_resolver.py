@@ -381,6 +381,17 @@ def register_identifier(
     - If exactly one other person holds the same normalized value, T2 auto-merge into
       the lexicographically smaller person_id, then attach the identifier to the survivor.
     - If multiple other owners (ambiguous), enqueue merge_candidates (T3).
+
+    **Caller contract (B-ING-1.12)**: when strong-kind auto-merge fires, the
+    caller's ``person_id`` may no longer exist (it was absorbed). Always follow
+    the returned ``person_id`` on subsequent operations::
+
+        r = register_identifier(pid, "phone", x)
+        pid = r.get("person_id") or pid  # ← track the merge survivor
+
+    Ignoring the return value and reusing the stale ``pid`` for the next
+    ``register_identifier`` call leaks orphan ``person_identifiers`` rows whose
+    ``person_id`` no longer has a matching ``persons`` row.
     """
     k = kind.lower()
     norm = normalize_value(k, value)
@@ -428,7 +439,12 @@ def ensure_person_with_seed(
     seed_identifiers: list[tuple[str, str]] | None = None,
     source_kind: str = "resolver",
 ) -> str:
-    """Create a new person row and optional seed identifiers; returns person_id."""
+    """Create a new person row and optional seed identifiers; returns person_id.
+
+    If any seed identifier triggers an auto-T2 merge (strong-kind collision), the
+    returned ``person_id`` is the merge survivor, not necessarily the freshly
+    generated one. (B-ING-1.12)
+    """
     pid = f"p_{uuid.uuid4().hex[:12]}"
     execute(
         """
@@ -439,7 +455,10 @@ def ensure_person_with_seed(
     )
     if seed_identifiers:
         for kind, val in seed_identifiers:
-            register_identifier(pid, kind, val, source_kind=source_kind)
+            r = register_identifier(pid, kind, val, source_kind=source_kind)
+            followed = r.get("person_id") if isinstance(r, dict) else None
+            if followed:
+                pid = followed
     return pid
 
 
